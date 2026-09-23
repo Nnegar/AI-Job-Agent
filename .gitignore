@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+
+# Personal data
+profile/career_profile.yaml
+resumes/
+database/*.db
+
+# Environment secrets
+.env

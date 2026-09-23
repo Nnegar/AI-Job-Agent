@@ -1,0 +1,43 @@
+weights:
+
+  technical_match: 20
+
+  ai_resilience: 30
+
+  career_growth: 30
+
+  compensation_location: 15
+
+  company_strength: 5
+
+
+ai_keywords:
+
+  high:
+
+    - LLM
+    - RAG
+    - machine learning
+    - AI
+    - automation
+
+
+telecom_keywords:
+
+  high:
+
+    - 5G
+    - RAN
+    - core network
+    - network optimization
+    - KPI analysis
+
+
+qa_keywords:
+
+  high:
+
+    - pytest
+    - Playwright
+    - API testing
+    - CI/CD
