@@ -11,33 +11,74 @@ weights:
   company_strength: 5
 
 
-ai_keywords:
+skill_groups:
 
-  high:
+  telecom:
 
-    - LLM
-    - RAG
-    - machine learning
-    - AI
-    - automation
+    weight: 20
 
+    keywords:
 
-telecom_keywords:
-
-  high:
-
-    - 5G
-    - RAN
-    - core network
-    - network optimization
-    - KPI analysis
+      - 5G
+      - RAN
+      - core network
+      - network optimization
+      - network analytics
+      - KPI
+      - anomaly detection
 
 
-qa_keywords:
+  ai:
 
-  high:
+    weight: 30
 
-    - pytest
-    - Playwright
-    - API testing
-    - CI/CD
+    keywords:
+
+      - AI
+      - machine learning
+      - LLM
+      - RAG
+      - automation
+      - data science
+
+
+  quality:
+
+    weight: 20
+
+    keywords:
+
+      - API testing
+      - pytest
+      - Playwright
+      - Selenium
+      - CI/CD
+      - test automation
+
+
+  cybersecurity:
+
+    weight: 20
+
+    keywords:
+
+      - security
+      - vulnerability
+      - Linux
+      - Wireshark
+      - incident
+
+
+countries:
+
+  Netherlands:
+    score: 15
+
+  Germany:
+    score: 14
+
+  Switzerland:
+    score: 15
+
+  Italy:
+    score: 8
