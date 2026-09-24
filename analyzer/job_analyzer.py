@@ -1,6 +1,8 @@
+
 import sqlite3
 import json
 import yaml
+from analyzer.cv_selector import CVSelector
 
 from analyzer.scorer import JobScorer
 
@@ -48,22 +50,26 @@ def save_analysis(job_id, result):
         """
         UPDATE jobs
 
-        SET
-        match_score = ?,
-        matched_skills = ?,
-        analysis_status = ?
+	SET
+	match_score = ?,
+	matched_skills = ?,
+	recommended_cv = ?,
+	category = ?,
+	analysis_status = ?
 
         WHERE id = ?
-        """,
+	        """,
 
         (
-            result["total_score"],
-            json.dumps(result),
-            "completed",
-            job_id
-        )
-    )
-
+            (
+	result["total_score"],
+	json.dumps(result),
+	result["recommended_cv"],
+	result["category"],
+	"completed",
+	job_id
+	)    )
+	)
 
     connection.commit()
     connection.close()
@@ -74,6 +80,7 @@ profile = load_profile()
 
 scorer = JobScorer()
 
+cv_selector = CVSelector()
 
 jobs = get_jobs()
 
@@ -90,7 +97,13 @@ for job in jobs:
 
 
     result = scorer.score(job_data)
+    cv_result = cv_selector.select(
+    job_data["title"] + " " + job_data["description"]
+    )
 
+    result["recommended_cv"] = cv_result["recommended_cv"]
+
+    result["category"] = cv_result["category"]
 
     save_analysis(
         job[0],
