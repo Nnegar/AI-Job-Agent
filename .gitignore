@@ -1,11 +1,25 @@
 # Python
 .venv/
 __pycache__/
+*.pyc
+
 
 # Personal data
 profile/career_profile.yaml
+profile/personal_profile.yaml
 resumes/
 database/*.db
 
 # Environment secrets
 .env
+.env.*
+*.key
+*.pem
+!.env.example
+
+
+
+# Reports
+reports/*.json
+reports/*.csv
+reports/*.zip
