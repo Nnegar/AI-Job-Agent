@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 
@@ -5,6 +6,8 @@ class JobAIRepository:
 
     def __init__(self, db_path):
         self.connection = sqlite3.connect(db_path)
+        self.connection.row_factory = sqlite3.Row
+
 
     def save_analysis(self, analysis):
 
@@ -31,13 +34,22 @@ class JobAIRepository:
             (
                 analysis["job_id"],
                 analysis.get("relevance_score"),
-                str(analysis.get("career_tracks")),
+                json.dumps(
+                    analysis.get("career_tracks", []),
+                    ensure_ascii=False
+                ),
                 analysis.get("role_category"),
                 analysis.get("seniority"),
                 analysis.get("location_assessment"),
                 analysis.get("summary"),
-                str(analysis.get("why_relevant")),
-                str(analysis.get("concerns")),
+                json.dumps(
+                    analysis.get("why_relevant", []),
+                    ensure_ascii=False
+                ),
+                json.dumps(
+                    analysis.get("concerns", []),
+                    ensure_ascii=False
+                ),
                 analysis.get("recommendation"),
                 analysis.get("model"),
             )
@@ -46,21 +58,25 @@ class JobAIRepository:
         self.connection.commit()
 
 
-    def get_unprocessed_jobs(self):
+    def get_analysis_by_job_id(self, job_id):
 
         cursor = self.connection.cursor()
 
         cursor.execute(
             """
-            SELECT jobs.*
-            FROM jobs
-            LEFT JOIN job_ai_analysis
-            ON jobs.id = job_ai_analysis.job_id
-            WHERE job_ai_analysis.id IS NULL
-            """
+            SELECT *
+            FROM job_ai_analysis
+            WHERE job_id = ?
+            """,
+            (job_id,)
         )
 
-        return cursor.fetchall()
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
 
 
     def close(self):

@@ -4,10 +4,11 @@ import re
 PRIORITY_COUNTRIES = {
     "Netherlands",
     "Germany",
-    "Switzerland",
 }
 
+
 SECONDARY_COUNTRIES = {
+    "Switzerland",
     "Austria",
     "Sweden",
     "Denmark",
@@ -18,6 +19,7 @@ SECONDARY_COUNTRIES = {
     "Canada",
 }
 
+
 OTHER_EU_COUNTRIES = {
     "Belgium",
     "Italy",
@@ -25,6 +27,7 @@ OTHER_EU_COUNTRIES = {
     "Spain",
     "Portugal",
 }
+
 
 OTHER_COUNTRIES = {
     "United States",
@@ -36,31 +39,36 @@ OTHER_COUNTRIES = {
     "Australia",
 }
 
+
 SENIOR_TITLE_PATTERN = re.compile(
-    r"\b(senior|sr\.?|staff|principal|"
-    r"director|head of)\b",
+    r"\b(senior|sr\.?|staff|principal|director|"
+    r"head of|lead|manager)\b",
     re.IGNORECASE,
 )
 
 
 def classify_location(locations):
+
     if not locations:
         return "unknown"
 
     results = []
 
+    groups = [
+        ("priority", PRIORITY_COUNTRIES),
+        ("secondary", SECONDARY_COUNTRIES),
+        ("other_eu", OTHER_EU_COUNTRIES),
+        ("outside", OTHER_COUNTRIES),
+    ]
+
     for location in locations:
+
         found = False
 
-        groups = [
-            ("priority", PRIORITY_COUNTRIES),
-            ("secondary", SECONDARY_COUNTRIES),
-            ("other_eu", OTHER_EU_COUNTRIES),
-            ("outside", OTHER_COUNTRIES),
-        ]
-
         for group, countries in groups:
+
             for country in countries:
+
                 if re.search(
                     rf"\b{re.escape(country)}\b",
                     location,
@@ -76,7 +84,8 @@ def classify_location(locations):
         if not found:
             results.append("unknown")
 
-    # A job may offer several possible countries.
+    # If a role is available in several countries,
+    # keep the best available location category.
     for priority in [
         "priority",
         "secondary",
@@ -91,6 +100,7 @@ def classify_location(locations):
 
 
 def classify_experience(title):
+
     if SENIOR_TITLE_PATTERN.search(title):
         return "senior"
 
@@ -106,11 +116,13 @@ def classify_experience(title):
 
 
 def assess_priority(job):
+
     return {
         "location_priority": classify_location(
             job.get("posting_locations", [])
         ),
+
         "experience": classify_experience(
-            job["title"]
+            job.get("title", "")
         ),
     }

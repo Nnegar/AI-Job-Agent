@@ -1,70 +1,59 @@
 import json
 
-from analyzer.job_repository import JobRepository
-from analyzer.stage1_job_intelligence import (
-    analyze_job_intelligence
-)
+from database.job_repository import JobRepository
+from database.job_ai_repository import JobAIRepository
+from analyzer.stage1.job_intelligence import analyze_job_intelligence
 
 
-repo = JobRepository(
-    "database/jobs.db"
-)
+DB_PATH = "database/jobs.db"
 
 
-jobs = repo.get_unanalyzed_jobs()
+def main():
+
+    job_repository = JobRepository(DB_PATH)
+    ai_repository = JobAIRepository(DB_PATH)
+
+    jobs = job_repository.get_unanalyzed_jobs()
+
+    print(f"Jobs waiting for AI: {len(jobs)}")
+
+    for job in jobs:
+
+        print("\n===================")
+        print(f"Company: {job['company']}")
+        print(f"Title: {job['title']}")
+        print(f"Location: {job['location']}")
+
+        try:
+
+            result = analyze_job_intelligence(job)
+
+            result["job_id"] = job["id"]
+
+            ai_repository.save_analysis(result)
+
+            print(
+                json.dumps(
+                    result,
+                    indent=2,
+                    ensure_ascii=False
+                )
+            )
+
+            print("Saved to job_ai_analysis.")
+
+        except Exception as error:
+
+            print(
+                f"Stage 1 failed for job "
+                f"{job['id']}: {error}"
+            )
+
+            continue
+
+    job_repository.close()
+    ai_repository.close()
 
 
-print(
-    f"Jobs waiting for AI: {len(jobs)}"
-)
-
-
-for row in jobs[:5]:
-
-    job = {
-
-        "id": row[0],
-        "source": row[1],
-        "source_job_id": row[2],
-        "company": row[3],
-        "title": row[4],
-        "location": row[5],
-        "description": row[7],
-    }
-
-
-    print("\n===================")
-    print(job["company"])
-    print(job["title"])
-
-
-    result = analyze_job_intelligence(job)
-
-
-    print(
-        json.dumps(
-            result,
-            indent=2
-        )
-    )
-
-
-    result["job_id"] = job["id"]
-
-    result["career_tracks"] = json.dumps(
-        result["career_tracks"]
-    )
-
-    result["why_relevant"] = json.dumps(
-        result["why_relevant"]
-    )
-
-    result["concerns"] = json.dumps(
-        result["concerns"]
-    )
-
-
-    repo.save_ai_analysis(result)
-
-
-repo.close()
+if __name__ == "__main__":
+    main()

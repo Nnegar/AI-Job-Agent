@@ -4,7 +4,7 @@ import yaml
 
 
 PROFILE_PATH = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "profile"
     / "personal_profile.yaml"
 )

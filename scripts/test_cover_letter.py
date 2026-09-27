@@ -1,6 +1,5 @@
 from analyzer.llm.openrouter_client import OpenRouterClient
-from analyzer.personal_story_selector import select_personal_context
-
+from analyzer.personalization.story_selector import select_personal_context
 
 job = {
     "title": "Network Automation Engineer",

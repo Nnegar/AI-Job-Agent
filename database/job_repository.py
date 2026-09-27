@@ -4,12 +4,27 @@ import sqlite3
 class JobRepository:
 
     def __init__(self, db_path):
+
         self.connection = sqlite3.connect(db_path)
+
+        self.connection.row_factory = sqlite3.Row
 
 
     def save_job(self, job):
 
         cursor = self.connection.cursor()
+
+        location = ", ".join(
+            job.get("posting_locations") or []
+        )
+
+        if not location:
+            location = job.get("location", "")
+
+        source_job_id = (
+            job.get("external_id")
+            or job.get("id")
+        )
 
         cursor.execute(
             """
@@ -29,10 +44,10 @@ class JobRepository:
             """,
             (
                 job["source"],
-                str(job["id"]),
+                str(source_job_id),
                 job.get("company"),
                 job.get("title"),
-                job.get("location"),
+                location,
                 job.get("url"),
                 job.get("description"),
                 job.get("requirements"),
@@ -49,19 +64,22 @@ class JobRepository:
 
         cursor.execute(
             """
-            SELECT
-                jobs.*
+            SELECT jobs.*
             FROM jobs
 
             LEFT JOIN job_ai_analysis
-            ON jobs.id = job_ai_analysis.job_id
+                ON jobs.id = job_ai_analysis.job_id
 
             WHERE job_ai_analysis.id IS NULL
+
+            ORDER BY jobs.id
             """
         )
 
-        return cursor.fetchall()
-
+        return [
+            dict(row)
+            for row in cursor.fetchall()
+        ]
 
 
     def get_job_by_id(self, job_id):
@@ -74,11 +92,15 @@ class JobRepository:
             FROM jobs
             WHERE id = ?
             """,
-            (job_id,)
+            (job_id,),
         )
 
-        return cursor.fetchone()
+        row = cursor.fetchone()
 
+        if row is None:
+            return None
+
+        return dict(row)
 
 
     def close(self):
