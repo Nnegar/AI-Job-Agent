@@ -95,4 +95,7 @@ def analyze_job_intelligence(job):
         content[content.index("{"):]
     )
 
+    result["job_id"] = job["id"]
+    result["model"] = "nvidia/nemotron-3-super-120b-a12b:free"
+
     return result

@@ -61,46 +61,6 @@ class JobRepository:
         )
 
         return cursor.fetchall()
-    
-    
-    def save_ai_analysis(self, analysis):
-
-        cursor = self.connection.cursor()
-
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO job_ai_analysis
-            (
-                job_id,
-                relevance_score,
-                career_tracks,
-                role_category,
-                seniority,
-                location_assessment,
-                summary,
-                why_relevant,
-                concerns,
-                recommendation,
-                model
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                analysis["job_id"],
-                analysis.get("relevance_score"),
-                analysis.get("career_tracks"),
-                analysis.get("role_category"),
-                analysis.get("seniority"),
-                analysis.get("location_assessment"),
-                analysis.get("summary"),
-                analysis.get("why_relevant"),
-                analysis.get("concerns"),
-                analysis.get("recommendation"),
-                analysis.get("model"),
-            )
-        )
-
-        self.connection.commit()
 
 
 
