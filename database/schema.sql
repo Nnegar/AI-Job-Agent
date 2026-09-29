@@ -117,6 +117,36 @@ CREATE TABLE IF NOT EXISTS candidate_job_analysis (
     UNIQUE(job_id)
 );
 
+-- =====================================================
+-- Stage 3 Final Application Filter & Priority Decisions
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS job_stage3_analysis (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    job_id INTEGER NOT NULL,
+
+    decision TEXT NOT NULL,
+
+    priority TEXT NOT NULL,
+
+    final_score REAL NOT NULL,
+
+    application_method TEXT NOT NULL,
+
+    readiness TEXT NOT NULL,
+
+    decision_reasons TEXT NOT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY(job_id)
+        REFERENCES jobs(id),
+
+    UNIQUE(job_id)
+);
+
 
 
 
