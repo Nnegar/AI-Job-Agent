@@ -109,6 +109,11 @@ LLM_CONFIG = {
     #
     # Stage 2 is NOT used by Stage 1.
     #
+    "stage2_max_requests_per_job": 3,
+    "stage2_max_requests_per_day": 300,
+    "stage2_max_requests_per_minute": 15,
+    "stage2_max_output_tokens": 2000,
+
     "stage2_models": [
         {
             "name": "openai/gpt-4.1-mini",
@@ -148,3 +153,21 @@ LLM_RUNTIME_CONFIG = {
     "output_error_cooldown_seconds": 120,
     "unavailable_model_cooldown_seconds": 3600,
 }
+
+
+LLM_STAGE2_RUNTIME_CONFIG = {
+    # Persistent runtime state for Stage 2.
+    "state_path": "runtime/stage2_runtime.json",
+
+    # Rate limits for paid Stage 2 models.
+    "requests_per_minute": 15,
+    "max_consecutive_rate_limits": 2,
+    "daily_request_limit": 300,
+
+    # Cooldown settings.
+    "rate_limit_cooldown_seconds": 60,
+    "temporary_error_cooldown_seconds": 30,
+    "output_error_cooldown_seconds": 90,
+    "unavailable_model_cooldown_seconds": 1800,
+}
+

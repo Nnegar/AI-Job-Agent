@@ -21,6 +21,13 @@ from analyzer.llm.stage1_runtime import (
     Stage1ConsecutiveRateLimitReached,
     get_stage1_runtime,
 )
+from analyzer.llm.stage2_runtime import (
+    Stage2DailyLimitReached,
+    Stage2JobRequestLimitReached,
+    Stage2NoAvailableModels,
+    Stage2ConsecutiveRateLimitReached,
+    get_stage2_runtime,
+)
 from analyzer.prompts.cover_letter_prompt import build_cover_letter_prompt
 from analyzer.prompts.job_analysis_prompt import JOB_ANALYSIS_PROMPT
 
@@ -76,6 +83,7 @@ class OpenRouterClient(LLMAnalyzer):
         prompt=None,
         messages=None,
         schema,
+        schema_name=None,
         stage="stage1",
         max_requests=None,
     ):
@@ -111,6 +119,9 @@ class OpenRouterClient(LLMAnalyzer):
             ]
 
         if stage == "stage1":
+            if schema_name is None:
+                schema_name = "job_intelligence"
+
             model_configs = LLM_CONFIG["stage1_models"]
             runtime = get_stage1_runtime()
 
@@ -135,18 +146,44 @@ class OpenRouterClient(LLMAnalyzer):
             return self._generate_stage1_json(
                 messages=messages,
                 schema=schema,
+                schema_name=schema_name,
                 model_configs=model_configs,
                 runtime=runtime,
                 max_requests=max_requests,
             )
 
         if stage == "stage2":
-            model_configs = LLM_CONFIG["stage2_models"]
+            if schema_name is None:
+                schema_name = "candidate_job_analysis"
 
-            return self._generate_json_with_models(
+            model_configs = LLM_CONFIG["stage2_models"]
+            runtime = get_stage2_runtime()
+
+            configured_limit = int(
+                LLM_CONFIG.get("stage2_max_requests_per_job", 3)
+            )
+
+            if max_requests is None:
+                max_requests = configured_limit
+
+            max_requests = min(
+                int(max_requests),
+                configured_limit,
+                len(model_configs),
+            )
+
+            if max_requests <= 0:
+                raise ValueError(
+                    "Stage 2 max_requests must be greater than zero."
+                )
+
+            return self._generate_stage2_json(
                 messages=messages,
                 schema=schema,
+                schema_name=schema_name,
                 model_configs=model_configs,
+                runtime=runtime,
+                max_requests=max_requests,
             )
 
         raise ValueError(
@@ -182,6 +219,7 @@ class OpenRouterClient(LLMAnalyzer):
         *,
         messages,
         schema,
+        schema_name="job_intelligence",
         model_configs,
         runtime,
         max_requests,
@@ -236,6 +274,7 @@ class OpenRouterClient(LLMAnalyzer):
                     model_config=model_config,
                     messages=messages,
                     schema=schema,
+                    schema_name=schema_name,
                 )
 
                 runtime.mark_success(model_name)
@@ -311,48 +350,142 @@ class OpenRouterClient(LLMAnalyzer):
         )
 
     # =========================================================
-    # Generic JSON generation for Stage 2
+    # Stage 2 JSON generation with dedicated Stage2Runtime
     # =========================================================
 
-    def _generate_json_with_models(
+    def _generate_stage2_json(
         self,
         *,
         messages,
         schema,
+        schema_name="candidate_job_analysis",
         model_configs,
+        runtime,
+        max_requests,
     ):
-        last_error = None
+        attempted_models = set()
+        attempts = 0
+        consecutive_rate_limits = 0
 
-        for model_config in model_configs:
+        while attempts < max_requests:
+            available = runtime.ordered_models(
+                model_configs
+            )
+
+            # Never attempt the same model twice for this job.
+            available = [
+                config
+                for config in available
+                if self._model_name(config)
+                not in attempted_models
+            ]
+
+            if not available:
+                if attempts == 0:
+                    raise Stage2NoAvailableModels(
+                        "No Stage 2 model is currently available."
+                    )
+
+                raise Stage2JobRequestLimitReached(
+                    "No additional Stage 2 model is available "
+                    "for this job."
+                )
+
+            model_config = available[0]
             model_name = self._model_name(model_config)
 
+            attempted_models.add(model_name)
+            attempts += 1
+
             print(
-                f"Trying model: {model_name}"
+                f"Trying Stage 2 model: {model_name} "
+                f"(job attempt {attempts}/{max_requests})"
             )
 
             try:
+                runtime.before_request(
+                    model_name=model_name,
+                    job_attempt=attempts,
+                    job_limit=max_requests,
+                )
+
                 result = self._request_json(
                     model_config=model_config,
                     messages=messages,
                     schema=schema,
+                    schema_name=schema_name,
                 )
 
+                runtime.mark_success(model_name)
+
                 print(
-                    f"Successful model: {model_name}"
+                    f"Successful Stage 2 model: {model_name}"
                 )
 
                 return result, model_name
 
-            except Exception as error:
-                last_error = error
+            except Stage2DailyLimitReached:
+                raise
 
-                print(
-                    f"Model failed: {model_name} - {error}"
+            except (
+                RateLimitError,
+                APIConnectionError,
+                APITimeoutError,
+                APIStatusError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as error:
+
+                runtime.mark_failure(
+                    model_name,
+                    error,
                 )
 
-        raise RuntimeError(
-            "All configured JSON models failed."
-        ) from last_error
+                if self._is_rate_limit_error(error):
+
+                    consecutive_rate_limits += 1
+
+                    print(
+                        "Consecutive Stage 2 rate limits: "
+                        f"{consecutive_rate_limits}/"
+                        f"{runtime.max_consecutive_rate_limits}"
+                    )
+
+                    if (
+                        consecutive_rate_limits
+                        >= runtime.max_consecutive_rate_limits
+                    ):
+                        raise Stage2ConsecutiveRateLimitReached(
+                            "Stage 2 stopped this job after "
+                            f"{consecutive_rate_limits} consecutive "
+                            "rate-limited model responses."
+                        ) from error
+
+                else:
+                    consecutive_rate_limits = 0
+
+                print(
+                    f"Stage 2 model failed: {model_name} - {error}"
+                )
+
+                continue
+
+            except Exception as error:
+                runtime.mark_failure(
+                    model_name,
+                    error,
+                )
+
+                print(
+                    f"Stage 2 model failed: {model_name} - {error}"
+                )
+
+                continue
+
+        raise Stage2JobRequestLimitReached(
+            "Stage 2 exhausted the hard per-job request limit: "
+            f"{attempts}/{max_requests}."
+        )
 
     # =========================================================
     # Actual OpenRouter request
@@ -364,6 +497,7 @@ class OpenRouterClient(LLMAnalyzer):
         model_config,
         messages,
         schema,
+        schema_name="job_intelligence",
     ):
         model_name = self._model_name(model_config)
         output_mode = model_config.get(
@@ -399,7 +533,7 @@ class OpenRouterClient(LLMAnalyzer):
             "max_tokens": (
                 LLM_CONFIG["stage1_max_output_tokens"]
                 if is_free_model
-                else 1600
+                else LLM_CONFIG.get("stage2_max_output_tokens", 2000)
             ),
         }
 
@@ -408,7 +542,7 @@ class OpenRouterClient(LLMAnalyzer):
             kwargs["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "job_intelligence",
+                    "name": schema_name,
                     "strict": True,
                     "schema": schema,
                 },
@@ -803,21 +937,11 @@ class OpenRouterClient(LLMAnalyzer):
                             f"{item!r}"
                         )
 
-        recommendation = result.get(
-            "recommendation"
-        )
-
-        if recommendation not in {
-            "send_to_stage_2",
-            "reject",
-        }:
-            raise ValueError(
-                "Invalid recommendation: "
-                f"{recommendation!r}"
-            )
-
-
 # Backward-compatible exports for old runner imports.
 Stage1DailyLimitReached = Stage1DailyLimitReached
 Stage1NoAvailableModels = Stage1NoAvailableModels
 Stage1JobRequestLimitReached = Stage1JobRequestLimitReached
+Stage2DailyLimitReached = Stage2DailyLimitReached
+Stage2NoAvailableModels = Stage2NoAvailableModels
+Stage2JobRequestLimitReached = Stage2JobRequestLimitReached
+
