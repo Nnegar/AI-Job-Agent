@@ -73,8 +73,8 @@ CREATE TABLE IF NOT EXISTS job_ai_analysis (
 
 
 -- =====================================================
--- Stage 2 Candidate Matching
--- Uses personal profile + CV
+-- Stage 2 Candidate-to-Job Fit Analysis
+-- Evaluates candidate profile against job intelligence
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS candidate_job_analysis (
@@ -85,17 +85,27 @@ CREATE TABLE IF NOT EXISTS candidate_job_analysis (
 
     match_score INTEGER,
 
-    recommended_cv TEXT,
+    technical_fit_score INTEGER,
+
+    career_track_fit_score INTEGER,
+
+    career_growth_score INTEGER,
+
+    ai_resilience_score INTEGER,
+
+    seniority_fit TEXT,
+
+    location_fit TEXT,
+
+    primary_track TEXT,
 
     strengths TEXT,
 
     skill_gaps TEXT,
 
-    apply_decision TEXT,
+    concerns TEXT,
 
     reasoning TEXT,
-
-    cover_letter TEXT,
 
     model TEXT,
 
@@ -106,6 +116,7 @@ CREATE TABLE IF NOT EXISTS candidate_job_analysis (
 
     UNIQUE(job_id)
 );
+
 
 
 

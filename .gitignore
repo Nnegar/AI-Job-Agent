@@ -24,5 +24,4 @@ reports/*.json
 reports/*.csv
 reports/*.zip
 
-
-runtime/stage1_runtime.json
+runtime/*.json
