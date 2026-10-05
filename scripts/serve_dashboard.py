@@ -1,8 +1,9 @@
 """
 Interactive Dashboard Local Server.
 Serves the daily intelligence report and provides REST API endpoints to:
-1. Update application status (e.g. mark as 'applied', 'interviewing', etc.) directly in jobs.db.
-2. Query live application statuses and market intelligence data.
+1. Update application status (e.g. mark as 'applied', 'screening', 'interview', 'offered', 'rejected', 'withdrawn') directly in jobs.db.
+2. Query live application statuses, pipeline metrics, and paginated historical database jobs.
+3. Automatically re-render static report snapshots on status transitions.
 
 Run via:
     python scripts/serve_dashboard.py [--port 8080]
@@ -14,6 +15,7 @@ import mimetypes
 import re
 import socket
 import sys
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict
@@ -22,16 +24,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from database.application_repository import ApplicationRepository
+from database.application_repository import ApplicationRepository, normalize_status
 from reports.daily_report_generator import generate_daily_reports
 
 REPORTS_DIR = PROJECT_ROOT / "reports"
 
 
-
 class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        url_path = self.path.split("?")[0]
+        parsed_url = urllib.parse.urlparse(self.path)
+        url_path = parsed_url.path
+        query_params = urllib.parse.parse_qs(parsed_url.query)
 
         # 1. API: List Applications
         if url_path == "/api/applications":
@@ -41,7 +44,58 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json({"applications": apps})
             return
 
-        # 2. Serve Latest Daily Report
+        # 2. API: Pipeline Summary & Jobs
+        if url_path == "/api/pipeline":
+            app_repo = ApplicationRepository()
+            summary = app_repo.get_pipeline_summary()
+            jobs = app_repo.get_pipeline_jobs()
+            app_repo.close()
+            self._send_json({
+                "summary": summary,
+                "jobs": jobs,
+            })
+            return
+
+        # 3. API: Database Historical Query (Paginated)
+        if url_path == "/api/database/jobs":
+            search = query_params.get("search", [None])[0]
+            company = query_params.get("company", [None])[0]
+            track = query_params.get("track", [None])[0]
+            priority = query_params.get("priority", [None])[0]
+            status = query_params.get("status", [None])[0]
+            source = query_params.get("source", [None])[0]
+            location = query_params.get("location", [None])[0]
+
+            try:
+                page = int(query_params.get("page", ["1"])[0])
+            except ValueError:
+                page = 1
+
+            try:
+                limit = int(query_params.get("limit", ["25"])[0])
+            except ValueError:
+                limit = 25
+
+            app_repo = ApplicationRepository()
+            result = app_repo.get_database_jobs(
+                search=search,
+                company=company,
+                track=track,
+                priority=priority,
+                status=status,
+                source=source,
+                location=location,
+                page=page,
+                limit=limit,
+            )
+            filters = app_repo.get_filter_options()
+            app_repo.close()
+
+            result["filters"] = filters
+            self._send_json(result)
+            return
+
+        # 4. Serve Latest Daily Report
         if url_path in ("/", "/index.html", "/report"):
             report_file = REPORTS_DIR / "latest_report.html"
             if not report_file.exists():
@@ -50,7 +104,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_file(report_file, "text/html")
             return
 
-        # 3. Serve Other Files in Reports Directory
+        # 5. Serve Other Files in Reports Directory
         safe_rel_path = url_path.lstrip("/")
         candidate_file = (REPORTS_DIR / safe_rel_path).resolve()
         if candidate_file.is_file() and candidate_file.is_relative_to(REPORTS_DIR):
@@ -72,8 +126,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
             try:
                 data = json.loads(body)
-                status = data.get("status", "applied")
+                raw_status = data.get("status", "applied")
+                status = normalize_status(raw_status)
                 notes = data.get("notes")
+                applied_date = data.get("applied_date")
 
                 app_repo = ApplicationRepository()
                 # Upsert or update status
@@ -81,19 +137,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     job_id=job_id,
                     status=status,
                     notes=notes,
+                    applied_date=applied_date,
                 )
+                pipeline_summary = app_repo.get_pipeline_summary()
                 app_repo.close()
 
-                # Also regenerate static report so static snapshots reflect latest state
+                # Regenerate static report asynchronously / immediately
                 generate_daily_reports()
 
                 self._send_json({
                     "success": True,
                     "job_id": job_id,
                     "status": status,
-                    "message": f"Job #{job_id} successfully marked as {status}",
+                    "summary": pipeline_summary,
+                    "message": f"Job #{job_id} successfully marked as {status.upper()}",
                 })
             except Exception as err:
+                import traceback
+                traceback.print_exc()
                 self._send_json({"error": str(err)}, status_code=400)
             return
 
@@ -120,8 +181,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
 
     def log_message(self, format, *args):
         # Clean terminal logging
@@ -149,6 +219,10 @@ def run_server(port: int = 8080):
     print("==================================================")
     print(f"Server running at:  http://localhost:{active_port}")
     print(f"Network URL:        http://127.0.0.1:{active_port}")
+    print("Endpoints:")
+    print(f"  • Web Dashboard:     http://localhost:{active_port}/")
+    print(f"  • Pipeline API:      http://localhost:{active_port}/api/pipeline")
+    print(f"  • Database Jobs API: http://localhost:{active_port}/api/database/jobs")
     print("Press Ctrl+C to stop.")
     print("==================================================")
 

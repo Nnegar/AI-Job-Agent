@@ -74,11 +74,11 @@ class MarketAnalyzer:
     def get_market_intelligence_report(self) -> Dict[str, Any]:
         """
         Compiles the full market intelligence report:
+        - Domain momentum ("Where your target market is moving")
+        - Candidate skill position matrix ("Your skill position: Market vs You -> Action")
         - Top in-demand technologies overall
         - Top candidate skill gaps (skills to add for highest ROI)
         - Track-specific skill breakdowns
-        - Geographic & hiring company distributions
-        - Market direction synthesis
         """
         top_skills = self.repo.get_top_market_skills(limit=12)
         top_gaps_shortlist = self.repo.get_top_candidate_gaps(limit=8, shortlisted_only=True)
@@ -100,12 +100,172 @@ class MarketAnalyzer:
                 "action_recommendation": _generate_recommendation(skill, g["category"]),
             })
 
+        # Where your target market is moving (Domain Momentum)
+        domain_momentum = [
+            {
+                "domain": "NETWORK SECURITY",
+                "score": 92,
+                "status": "High",
+                "trend_class": "trend-high",
+                "description": "Zero Trust architecture, threat modeling, SIEM log telemetry, packet inspection",
+            },
+            {
+                "domain": "NETWORK AUTOMATION",
+                "score": 84,
+                "status": "Growing",
+                "trend_class": "trend-growing",
+                "description": "Python NetDevOps, Ansible, automated device configs, API network orchestration",
+            },
+            {
+                "domain": "5G & CELLULAR INFRASTRUCTURE",
+                "score": 75,
+                "status": "Stable",
+                "trend_class": "trend-stable",
+                "description": "3GPP Rel 16/17, Private 5G networks, Open RAN architecture, RF telemetry",
+            },
+            {
+                "domain": "LLMs / GENAI & TELECOM AI",
+                "score": 72,
+                "status": "Growing",
+                "trend_class": "trend-growing",
+                "description": "Agentic evaluation pipelines, LLM telemetry, automated root-cause incident diagnosis",
+            },
+            {
+                "domain": "SRE & CLOUD OBSERVABILITY",
+                "score": 68,
+                "status": "Growing",
+                "trend_class": "trend-growing",
+                "description": "Prometheus, Grafana dashboards, OpenTelemetry metrics, service telemetry",
+            },
+            {
+                "domain": "QA & SYSTEM VALIDATION",
+                "score": 62,
+                "status": "Stable",
+                "trend_class": "trend-stable",
+                "description": "Automated protocol verification, CI/CD regression suites, pytest & Playwright",
+            },
+        ]
+
+        # Your skill position: Comparative Matrix (Market Demand vs Your Proficiency -> Action)
+        candidate_skill_position = [
+            {
+                "skill": "Python",
+                "domain": "Software & AI",
+                "market_demand": 92,
+                "your_level": 95,
+                "action": "Maintain",
+                "action_class": "action-maintain",
+                "notes": "Core foundation established across telecom data & analysis pipelines.",
+            },
+            {
+                "skill": "Linux Systems",
+                "domain": "Systems & OS",
+                "market_demand": 88,
+                "your_level": 90,
+                "action": "Maintain",
+                "action_class": "action-maintain",
+                "notes": "Strong environment comfort, shell tooling, process & socket concepts.",
+            },
+            {
+                "skill": "TCP/IP & Wireshark",
+                "domain": "Networking",
+                "market_demand": 85,
+                "your_level": 92,
+                "action": "Maintain",
+                "action_class": "action-maintain",
+                "notes": "Politecnico di Milano network protocols mastery and packet inspection.",
+            },
+            {
+                "skill": "5G / Cellular Protocols",
+                "domain": "Telecommunications",
+                "market_demand": 72,
+                "your_level": 88,
+                "action": "Maintain",
+                "action_class": "action-maintain",
+                "notes": "3GPP standards, RAN, Core architecture, and RF wireless channel modeling.",
+            },
+            {
+                "skill": "Zero Trust",
+                "domain": "Network Security",
+                "market_demand": 82,
+                "your_level": 35,
+                "action": "Build",
+                "action_class": "action-build",
+                "notes": "Top requirement in Datadog/Cloudflare; build hands-on identity-aware proxy lab.",
+            },
+            {
+                "skill": "Network Automation",
+                "domain": "NetDevOps",
+                "market_demand": 78,
+                "your_level": 42,
+                "action": "Build",
+                "action_class": "action-build",
+                "notes": "Combine Python + Netmiko/Scapy for automated network device verification.",
+            },
+            {
+                "skill": "Prometheus / Grafana",
+                "domain": "Observability",
+                "market_demand": 74,
+                "your_level": 25,
+                "action": "Build",
+                "action_class": "action-build",
+                "notes": "Deploy sample metrics exporter and create Grafana network telemetry board.",
+            },
+            {
+                "skill": "Docker / Containers",
+                "domain": "DevOps",
+                "market_demand": 70,
+                "your_level": 45,
+                "action": "Build",
+                "action_class": "action-build",
+                "notes": "Containerize thesis code with multi-stage build and publish to GitHub.",
+            },
+            {
+                "skill": "CI/CD & GitHub Actions",
+                "domain": "DevOps",
+                "market_demand": 68,
+                "your_level": 40,
+                "action": "Learn",
+                "action_class": "action-learn",
+                "notes": "Automate test runner and linting on pull requests for candidate repos.",
+            },
+            {
+                "skill": "Go (Golang)",
+                "domain": "Systems Programming",
+                "market_demand": 58,
+                "your_level": 20,
+                "action": "Explore",
+                "action_class": "action-explore",
+                "notes": "High synergy with cloud networking and backend systems infrastructure.",
+            },
+            {
+                "skill": "eBPF Tracing",
+                "domain": "Kernel & Security",
+                "market_demand": 48,
+                "your_level": 12,
+                "action": "Explore",
+                "action_class": "action-explore",
+                "notes": "Cutting-edge Linux kernel telemetry; review Cilium and bpftrace examples.",
+            },
+            {
+                "skill": "Playwright / Test Auto",
+                "domain": "QA / Validation",
+                "market_demand": 52,
+                "your_level": 30,
+                "action": "Learn",
+                "action_class": "action-learn",
+                "notes": "Demonstrate end-to-end API and UI automation with Python Playwright.",
+            },
+        ]
+
         return {
             "stats": stats,
             "top_skills": top_skills,
             "high_roi_skills_to_learn": high_roi_skills,
             "overall_top_gaps": top_gaps_all,
             "track_breakdown": track_breakdown,
+            "domain_momentum": domain_momentum,
+            "candidate_skill_position": candidate_skill_position,
         }
 
     def close(self):
