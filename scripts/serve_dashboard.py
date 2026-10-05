@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Interactive Dashboard Local Server.
 Serves the daily intelligence report and provides REST API endpoints to:

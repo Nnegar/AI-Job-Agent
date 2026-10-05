@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Daily Digest and Interactive Report Generator.
 Generates:

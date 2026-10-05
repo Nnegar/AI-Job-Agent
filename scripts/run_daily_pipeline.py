@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Master End-of-Day Pipeline Runner.
 
