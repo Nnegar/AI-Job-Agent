@@ -43,6 +43,14 @@ class TestDailyReport(unittest.TestCase):
         self.assertIn('saveModalNotes', html_text)
         self.assertIn('updateJobStatus', html_text)
 
+        # Header runner button and pipeline run screen
+        self.assertIn('btn-run-pipeline', html_text)
+        self.assertIn('pipeline-run-modal', html_text)
+        self.assertIn('header-last-run', html_text)
+        self.assertIn('openPipelineRunModal', html_text)
+        self.assertIn('pipe-run-complete-view', html_text)
+        self.assertNotIn('Pipeline Healthy & Up to Date', html_text)
+
 
 if __name__ == '__main__':
     unittest.main()

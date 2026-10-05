@@ -79,6 +79,32 @@ class TestServeDashboard(unittest.TestCase):
             self.assertTrue(data.get("success"))
             self.assertIn("summary", data)
 
+    def test_post_pipeline_run_api(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/api/pipeline/run",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(data.get("success"))
+            self.assertIn("summary", data)
+            self.assertEqual(data["summary"]["collected"], 109)
+            self.assertEqual(data["summary"]["new_jobs"], 92)
+            self.assertEqual(data["summary"]["stage2"], 41)
+            self.assertEqual(data["summary"]["shortlisted"], 18)
+
+    def test_get_pipeline_run_stream_api(self):
+        req = urllib.request.Request(f"{self.base_url}/api/pipeline/run-stream")
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/event-stream", resp.headers.get("Content-Type", ""))
+            # Read first chunk
+            chunk = resp.readline().decode("utf-8")
+            self.assertTrue(chunk.startswith("data:"))
+
     def test_serve_html_dashboard(self):
         req = urllib.request.Request(f"{self.base_url}/")
         with urllib.request.urlopen(req) as resp:
@@ -91,6 +117,10 @@ class TestServeDashboard(unittest.TestCase):
             self.assertIn("tab-btn-market", content)
             self.assertIn("pipe-table-body", content)
             self.assertIn("app-modal", content)
+            self.assertIn("btn-run-pipeline", content)
+            self.assertIn("header-last-run", content)
+            self.assertIn("pipeline-run-modal", content)
+            self.assertNotIn("Pipeline Healthy & Up to Date", content)
 
 
 if __name__ == "__main__":

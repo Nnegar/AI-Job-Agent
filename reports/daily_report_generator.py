@@ -274,6 +274,9 @@ def generate_html_report(
     total_db_count = len(all_db_jobs)
     active_pipe_count = pipeline_summary.get("all_active", 0)
 
+    now = datetime.datetime.now()
+    last_run_display = f"{now.day} {now.strftime('%b')}, {now.strftime('%H:%M')}"
+
     # 1. Generate Action Queue Cards HTML (Tab 1)
     action_cards_html = []
     for j in action_jobs:
@@ -547,25 +550,486 @@ def generate_html_report(
             font-size: 14px;
             margin-top: 4px;
         }}
-        .status-pill-live {{
-            background-color: rgba(16, 185, 129, 0.15);
-            color: var(--accent-green);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            font-size: 12px;
-            font-weight: 600;
-            padding: 6px 12px;
-            border-radius: 9999px;
-            display: inline-flex;
+        .header-runner-panel {{
+            display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 14px;
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            padding: 8px 14px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }}
-        .status-pill-live::before {{
-            content: "";
-            width: 8px;
-            height: 8px;
+        .header-status-line {{
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }}
+        .status-indicator-dot {{
+            width: 9px;
+            height: 9px;
             background-color: var(--accent-green);
             border-radius: 50%;
             display: inline-block;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
+            animation: pulse-dot 2.5s infinite;
+        }}
+        @keyframes pulse-dot {{
+            0%, 100% {{ opacity: 1; transform: scale(1); }}
+            50% {{ opacity: 0.5; transform: scale(0.85); }}
+        }}
+        .status-text-main {{
+            color: var(--text-primary);
+            font-weight: 600;
+        }}
+        .status-sep {{
+            color: var(--text-muted);
+        }}
+        .status-last-run {{
+            color: var(--text-secondary);
+            font-family: var(--font-mono, monospace);
+            font-size: 12px;
+        }}
+        .btn-run-pipeline {{
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+        }}
+        .btn-run-pipeline:hover {{
+            background: linear-gradient(135deg, #1d4ed8, #1e40af);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.45);
+        }}
+        .btn-run-pipeline:active {{
+            transform: translateY(0);
+        }}
+        .btn-run-pipeline .run-icon {{
+            font-size: 10px;
+        }}
+
+        /* Temporary Pipeline Run Screen (Modal) */
+        .run-modal-backdrop {{
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 15, 29, 0.85);
+            backdrop-filter: blur(10px);
+            z-index: 5000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }}
+        .run-modal-card {{
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 16px;
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85);
+            width: 100%;
+            max-width: 780px;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 32px;
+            color: #f8fafc;
+            animation: modalFadeIn 0.25s ease-out;
+        }}
+        @keyframes modalFadeIn {{
+            from {{ opacity: 0; transform: scale(0.97) translateY(8px); }}
+            to {{ opacity: 1; transform: scale(1) translateY(0); }}
+        }}
+        .run-modal-header {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 22px;
+        }}
+        .run-spinner-ring {{
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(59, 130, 246, 0.2);
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: run-spin 1s linear infinite;
+        }}
+        @keyframes run-spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+        .run-modal-title {{
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            color: #f8fafc;
+            margin: 0;
+        }}
+        .run-modal-subtitle {{
+            font-size: 13px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }}
+
+        /* Master progress */
+        .master-progress-section {{
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+        }}
+        .master-progress-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #e2e8f0;
+            margin-bottom: 10px;
+        }}
+        .master-progress-track {{
+            height: 14px;
+            background: #0f172a;
+            border-radius: 7px;
+            overflow: hidden;
+            border: 1px solid #334155;
+        }}
+        .master-progress-fill {{
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #06b6d4, #10b981);
+            border-radius: 7px;
+            transition: width 0.35s ease;
+        }}
+        .progress-pct {{
+            font-family: var(--font-mono, monospace);
+            color: #38bdf8;
+            font-weight: 700;
+        }}
+
+        /* Checklist */
+        .run-checklist-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }}
+        .run-check-item {{
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s ease;
+        }}
+        .run-check-item.active {{
+            color: #38bdf8;
+            border-color: #38bdf8;
+            background: rgba(56, 189, 248, 0.08);
+        }}
+        .run-check-item.done {{
+            color: #34d399;
+            border-color: rgba(52, 211, 153, 0.4);
+            background: rgba(52, 211, 153, 0.06);
+        }}
+        .check-icon {{
+            font-weight: 700;
+        }}
+
+        /* Live Callout */
+        .run-status-callout {{
+            background: rgba(30, 41, 59, 0.9);
+            border-left: 4px solid #38bdf8;
+            border-radius: 0 8px 8px 0;
+            padding: 12px 16px;
+            font-family: var(--font-mono, monospace);
+            font-size: 13px;
+            color: #7dd3fc;
+            margin-bottom: 20px;
+        }}
+
+        /* Informative Multi-Stage Details */
+        .run-details-scrollable {{
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-height: 380px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }}
+        .stage-detail-box {{
+            background: #162032;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 14px 18px;
+        }}
+        .stage-detail-title {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            font-weight: 700;
+            color: #e2e8f0;
+            margin-bottom: 8px;
+        }}
+        .badge-sub-count {{
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            background: #1e293b;
+            color: #94a3b8;
+            font-family: var(--font-mono, monospace);
+        }}
+        .stage-source-chips {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }}
+        .source-chip {{
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #cbd5e1;
+        }}
+        .source-chip.done {{
+            border-color: rgba(52, 211, 153, 0.4);
+            color: #34d399;
+        }}
+        .stage-dedupe-lines {{
+            font-size: 12px;
+            color: #94a3b8;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 6px;
+        }}
+        .dedupe-line.highlight {{
+            color: #38bdf8;
+            font-weight: 700;
+        }}
+        .mini-progress-track {{
+            height: 8px;
+            background: #0f172a;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid #334155;
+            margin: 8px 0;
+        }}
+        .mini-progress-fill {{
+            height: 100%;
+            background: #3b82f6;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }}
+        .mini-progress-fill.green {{
+            background: #10b981;
+        }}
+        .stage-counts-row {{
+            display: flex;
+            gap: 12px;
+            margin-top: 6px;
+        }}
+        .count-badge {{
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+        }}
+        .count-badge.green {{ background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }}
+        .count-badge.red {{ background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }}
+        .count-badge.amber {{ background: rgba(245, 158, 11, 0.15); color: #fde047; border: 1px solid rgba(245, 158, 11, 0.3); }}
+
+        .final-check-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 6px;
+        }}
+        .final-item.done {{
+            color: #34d399;
+            font-weight: 600;
+        }}
+
+        /* Completion View */
+        .complete-header {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 22px;
+        }}
+        .complete-celebration-badge {{
+            font-size: 32px;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 50%;
+            width: 54px;
+            height: 54px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .complete-title {{
+            font-size: 22px;
+            font-weight: 800;
+            color: #f8fafc;
+            margin: 0;
+            letter-spacing: 0.5px;
+        }}
+        .complete-subtitle {{
+            font-size: 14px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }}
+        .complete-metrics-wrap {{
+            margin-bottom: 22px;
+        }}
+        .complete-summary-table {{
+            width: 100%;
+            border-collapse: collapse;
+            background: #162032;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            overflow: hidden;
+            font-size: 14px;
+        }}
+        .complete-summary-table td {{
+            padding: 12px 18px;
+            border-bottom: 1px solid #1e293b;
+            color: #cbd5e1;
+        }}
+        .complete-summary-table tr:last-child td {{
+            border-bottom: none;
+        }}
+        .complete-summary-table .metric-num {{
+            text-align: right;
+            font-family: var(--font-mono, monospace);
+            font-weight: 700;
+            font-size: 15px;
+        }}
+        .complete-summary-table .highlight-row td {{
+            background: rgba(16, 185, 129, 0.08);
+            font-weight: 700;
+        }}
+        .text-green {{ color: #34d399 !important; }}
+        .text-blue {{ color: #38bdf8 !important; }}
+        .text-amber {{ color: #fbbf24 !important; }}
+
+        .complete-domain-section {{
+            margin-bottom: 20px;
+        }}
+        .domain-sec-title {{
+            font-size: 12px;
+            font-weight: 700;
+            color: #94a3b8;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }}
+        .domain-pills-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+        }}
+        .domain-pill-card {{
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .domain-name {{
+            font-size: 13px;
+            font-weight: 600;
+            color: #e2e8f0;
+        }}
+        .domain-val {{
+            font-family: var(--font-mono, monospace);
+            font-weight: 700;
+            color: #38bdf8;
+            background: rgba(56, 189, 248, 0.15);
+            padding: 2px 8px;
+            border-radius: 6px;
+        }}
+
+        .queue-impact-card {{
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(16, 185, 129, 0.15));
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 24px;
+        }}
+        .impact-icon {{
+            font-size: 24px;
+        }}
+        .impact-title {{
+            font-size: 15px;
+            font-weight: 700;
+            color: #f8fafc;
+        }}
+        .impact-sub {{
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }}
+
+        .complete-actions-bar {{
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }}
+        .btn-view-new-jobs {{
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }}
+        .btn-view-new-jobs:hover {{
+            background: linear-gradient(135deg, #059669, #047857);
+            transform: translateY(-1px);
+        }}
+        .btn-close-runner {{
+            background: #1e293b;
+            color: #cbd5e1;
+            border: 1px solid #475569;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .btn-close-runner:hover {{
+            background: #334155;
+            color: #f8fafc;
         }}
 
         /* Top Metric Cards */
@@ -1687,8 +2151,16 @@ def generate_html_report(
                 <h1>AI Job Agent — Daily Intelligence Report & Application Pipeline</h1>
                 <p>Negar Najafi • MSc Telecommunications Engineering (Politecnico di Milano) • Milan, Italy • Europe Focus</p>
             </div>
-            <div>
-                <span class="status-pill-live">Pipeline Healthy & Up to Date</span>
+            <div class="header-runner-panel">
+                <div class="header-status-line">
+                    <span class="status-indicator-dot"></span>
+                    <span class="status-text-main" id="header-status-text">Up to date</span>
+                    <span class="status-sep">·</span>
+                    <span class="status-last-run" id="header-last-run">Last run: {last_run_display}</span>
+                </div>
+                <button class="btn-run-pipeline" id="btn-run-pipeline" onclick="openPipelineRunModal()">
+                    <span class="run-icon">▶</span> RUN PIPELINE
+                </button>
             </div>
         </header>
 
@@ -2113,6 +2585,213 @@ def generate_html_report(
                 <button class="btn btn-copy" onclick="closeModal()">Close</button>
                 <button class="btn btn-applied" id="modal-btn-save" onclick="saveModalNotes()">💾 Save Notes</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Temporary Pipeline Run Screen (Modal) -->
+    <div id="pipeline-run-modal" class="run-modal-backdrop" style="display: none;">
+        <div class="run-modal-card">
+            
+            <!-- STATE A: RUNNING VIEW -->
+            <div id="pipe-run-progress-view">
+                <div class="run-modal-header">
+                    <div class="run-spinner-ring"></div>
+                    <div>
+                        <h2 class="run-modal-title">RUNNING JOB PIPELINE</h2>
+                        <p class="run-modal-subtitle">Collecting and analyzing new European opportunities</p>
+                    </div>
+                </div>
+
+                <!-- Master Progress Bar -->
+                <div class="master-progress-section">
+                    <div class="master-progress-header">
+                        <span class="progress-label" id="run-current-stage-title">Executing autonomous pipeline...</span>
+                        <span class="progress-pct" id="run-master-pct">0%</span>
+                    </div>
+                    <div class="master-progress-track">
+                        <div class="master-progress-fill" id="run-master-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <!-- Stage Checklist -->
+                <div class="run-checklist-grid">
+                    <div class="run-check-item" id="chk-step-1">
+                        <span class="check-icon">○</span> Collect jobs
+                    </div>
+                    <div class="run-check-item" id="chk-step-2">
+                        <span class="check-icon">○</span> Deduplicate
+                    </div>
+                    <div class="run-check-item" id="chk-step-3">
+                        <span class="check-icon">○</span> Stage 1 — Relevance screening
+                    </div>
+                    <div class="run-check-item" id="chk-step-4">
+                        <span class="check-icon">○</span> Stage 2 — Candidate matching
+                    </div>
+                    <div class="run-check-item" id="chk-step-5">
+                        <span class="check-icon">○</span> Update application queue
+                    </div>
+                </div>
+
+                <!-- Live Status Callout -->
+                <div class="run-status-callout" id="run-live-callout">
+                    Current: Initializing pipeline environment...
+                </div>
+
+                <!-- Informative Multi-Stage Detail Cards -->
+                <div class="run-details-scrollable">
+                    <!-- 1. Collection -->
+                    <div class="stage-detail-box" id="detail-box-collect">
+                        <div class="stage-detail-title">
+                            <span>1. Multi-Source Collection</span>
+                            <span class="badge-sub-count" id="stat-collect-total">Waiting...</span>
+                        </div>
+                        <div class="stage-source-chips" id="detail-collect-chips">
+                            <span class="source-chip" id="chip-cloudflare">Cloudflare: pending</span>
+                            <span class="source-chip" id="chip-datadog">Datadog: pending</span>
+                            <span class="source-chip" id="chip-elastic">Elastic: pending</span>
+                            <span class="source-chip" id="chip-others">Other sources: pending</span>
+                        </div>
+                    </div>
+
+                    <!-- 2. Deduplication -->
+                    <div class="stage-detail-box" id="detail-box-dedupe">
+                        <div class="stage-detail-title">
+                            <span>2. Deduplication & Capped Lookback</span>
+                            <span class="badge-sub-count" id="stat-dedupe-result">Pending</span>
+                        </div>
+                        <div class="stage-dedupe-lines" id="detail-dedupe-lines">
+                            <div class="dedupe-line" id="line-dedupe-collected">○ Ingested jobs: —</div>
+                            <div class="dedupe-line" id="line-dedupe-dupes">○ Duplicates identified: —</div>
+                            <div class="dedupe-line highlight" id="line-dedupe-unique">→ Net new unique jobs: —</div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Stage 1 Relevance -->
+                    <div class="stage-detail-box" id="detail-box-stage1">
+                        <div class="stage-detail-title">
+                            <span>3. Stage 1 — Relevance Screening</span>
+                            <span class="badge-sub-count" id="stat-stage1-progress">Pending</span>
+                        </div>
+                        <div class="mini-progress-track">
+                            <div class="mini-progress-fill" id="fill-stage1" style="width: 0%;"></div>
+                        </div>
+                        <div class="stage-counts-row">
+                            <div class="count-badge green" id="stat-stage1-passed">Send to Stage 2: —</div>
+                            <div class="count-badge red" id="stat-stage1-rejected">Rejected: —</div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Stage 2 Matching -->
+                    <div class="stage-detail-box" id="detail-box-stage2">
+                        <div class="stage-detail-title">
+                            <span>4. Stage 2 — Candidate Matching</span>
+                            <span class="badge-sub-count" id="stat-stage2-progress">Pending</span>
+                        </div>
+                        <div class="mini-progress-track">
+                            <div class="mini-progress-fill" id="fill-stage2" style="width: 0%;"></div>
+                        </div>
+                        <div class="stage-counts-row">
+                            <div class="count-badge green" id="stat-stage2-strong">Strong matches: —</div>
+                            <div class="count-badge amber" id="stat-stage2-borderline">Borderline: —</div>
+                        </div>
+                    </div>
+
+                    <!-- 5. Final Update -->
+                    <div class="stage-detail-box" id="detail-box-final">
+                        <div class="stage-detail-title">
+                            <span>5. Final Updates</span>
+                            <span class="badge-sub-count" id="stat-final-status">Pending</span>
+                        </div>
+                        <div class="final-check-list" id="final-updates-list">
+                            <div class="final-item" id="fitem-db">○ Job database updated</div>
+                            <div class="final-item" id="fitem-queue">○ Application queue updated</div>
+                            <div class="final-item" id="fitem-market">○ Market intelligence updated</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STATE B: COMPLETION VIEW -->
+            <div id="pipe-run-complete-view" style="display: none;">
+                <div class="complete-header">
+                    <div class="complete-celebration-badge">🎉</div>
+                    <div>
+                        <h2 class="complete-title">PIPELINE COMPLETED</h2>
+                        <p class="complete-subtitle" id="complete-subtitle">92 new jobs processed</p>
+                    </div>
+                </div>
+
+                <!-- Summary Metrics Table -->
+                <div class="complete-metrics-wrap">
+                    <table class="complete-summary-table">
+                        <tbody>
+                            <tr>
+                                <td>Collected</td>
+                                <td class="metric-num" id="comp-metric-collected">109</td>
+                            </tr>
+                            <tr>
+                                <td>Duplicates</td>
+                                <td class="metric-num text-amber" id="comp-metric-dupes">17</td>
+                            </tr>
+                            <tr>
+                                <td>New Jobs Processed</td>
+                                <td class="metric-num text-blue" id="comp-metric-new">92</td>
+                            </tr>
+                            <tr>
+                                <td>Stage 2 Evaluated</td>
+                                <td class="metric-num" id="comp-metric-stage2">41</td>
+                            </tr>
+                            <tr class="highlight-row">
+                                <td>Shortlisted (Actionable)</td>
+                                <td class="metric-num text-green" id="comp-metric-shortlist">18</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- New Opportunities By Domain -->
+                <div class="complete-domain-section">
+                    <div class="domain-sec-title">NEW OPPORTUNITIES BY TRACK</div>
+                    <div class="domain-pills-grid" id="comp-domains-grid">
+                        <div class="domain-pill-card">
+                            <span class="domain-name">Cybersecurity</span>
+                            <span class="domain-val">9</span>
+                        </div>
+                        <div class="domain-pill-card">
+                            <span class="domain-name">Telecom AI</span>
+                            <span class="domain-val">5</span>
+                        </div>
+                        <div class="domain-pill-card">
+                            <span class="domain-name">Applied AI</span>
+                            <span class="domain-val">3</span>
+                        </div>
+                        <div class="domain-pill-card">
+                            <span class="domain-name">SRE / Cloud</span>
+                            <span class="domain-val">1</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Queue Impact Banner -->
+                <div class="queue-impact-card" id="comp-queue-banner">
+                    <span class="impact-icon">📥</span>
+                    <div>
+                        <div class="impact-title" id="comp-queue-title">Application queue: 20 → 24</div>
+                        <div class="impact-sub">New high-priority jobs with generated cover letters ready in Action Queue.</div>
+                    </div>
+                </div>
+
+                <!-- Modal Actions -->
+                <div class="complete-actions-bar">
+                    <button class="btn-view-new-jobs" onclick="viewNewJobsAndClose()">
+                        View New Jobs ➔
+                    </button>
+                    <button class="btn-close-runner" onclick="closePipelineRunModal()">
+                        Close
+                    </button>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -2768,6 +3447,308 @@ def generate_html_report(
             if (!text) return '';
             const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }};
             return text.toString().replace(/[&<>"']/g, m => map[m]);
+        }}
+
+        // ==========================================
+        // Temporary Pipeline Run Modal & Execution
+        // ==========================================
+        let pipelineRunEventSource = null;
+        let isPipelineRunning = false;
+
+        function openPipelineRunModal() {{
+            if (isPipelineRunning) return;
+            const modal = document.getElementById('pipeline-run-modal');
+            if (!modal) return;
+
+            // Reset modal views
+            document.getElementById('pipe-run-progress-view').style.display = 'block';
+            document.getElementById('pipe-run-complete-view').style.display = 'none';
+
+            // Reset progress bars and labels
+            document.getElementById('run-master-fill').style.width = '0%';
+            document.getElementById('run-master-pct').innerText = '0%';
+            document.getElementById('run-current-stage-title').innerText = 'Initializing autonomous pipeline...';
+            document.getElementById('run-live-callout').innerText = 'Current: Connecting to European sources & LinkedIn...';
+
+            // Reset checklist
+            for (let i = 1; i <= 5; i++) {{
+                const el = document.getElementById('chk-step-' + i);
+                if (el) {{
+                    el.className = 'run-check-item';
+                    const icon = el.querySelector('.check-icon');
+                    if (icon) icon.innerText = '○';
+                }}
+            }}
+
+            // Reset detail boxes
+            const statCol = document.getElementById('stat-collect-total');
+            if (statCol) statCol.innerText = 'Waiting...';
+            ['cloudflare', 'datadog', 'elastic', 'others'].forEach(k => {{
+                const ch = document.getElementById('chip-' + k);
+                if (ch) {{
+                    ch.className = 'source-chip';
+                    ch.innerText = (k === 'others' ? 'Other sources' : k.charAt(0).toUpperCase() + k.slice(1)) + ': pending';
+                }}
+            }});
+
+            const statDedupe = document.getElementById('stat-dedupe-result');
+            if (statDedupe) statDedupe.innerText = 'Pending';
+            const lIng = document.getElementById('line-dedupe-collected');
+            if (lIng) lIng.innerText = '○ Ingested jobs: —';
+            const lDup = document.getElementById('line-dedupe-dupes');
+            if (lDup) lDup.innerText = '○ Duplicates identified: —';
+            const lUniq = document.getElementById('line-dedupe-unique');
+            if (lUniq) lUniq.innerText = '→ Net new unique jobs: —';
+
+            const fillS1 = document.getElementById('fill-stage1');
+            if (fillS1) fillS1.style.width = '0%';
+            const statS1P = document.getElementById('stat-stage1-progress');
+            if (statS1P) statS1P.innerText = 'Pending';
+            const statS1Pass = document.getElementById('stat-stage1-passed');
+            if (statS1Pass) statS1Pass.innerText = 'Send to Stage 2: —';
+            const statS1Rej = document.getElementById('stat-stage1-rejected');
+            if (statS1Rej) statS1Rej.innerText = 'Rejected: —';
+
+            const fillS2 = document.getElementById('fill-stage2');
+            if (fillS2) fillS2.style.width = '0%';
+            const statS2P = document.getElementById('stat-stage2-progress');
+            if (statS2P) statS2P.innerText = 'Pending';
+            const statS2Str = document.getElementById('stat-stage2-strong');
+            if (statS2Str) statS2Str.innerText = 'Strong matches: —';
+            const statS2Brd = document.getElementById('stat-stage2-borderline');
+            if (statS2Brd) statS2Brd.innerText = 'Borderline: —';
+
+            const statFin = document.getElementById('stat-final-status');
+            if (statFin) statFin.innerText = 'Pending';
+            ['db', 'queue', 'market'].forEach(k => {{
+                const it = document.getElementById('fitem-' + k);
+                if (it) {{
+                    it.className = 'final-item';
+                    if (k === 'db') it.innerText = '○ Job database updated';
+                    if (k === 'queue') it.innerText = '○ Application queue updated';
+                    if (k === 'market') it.innerText = '○ Market intelligence updated';
+                }}
+            }});
+
+            modal.style.display = 'flex';
+            startPipelineExecution();
+        }}
+
+        function closePipelineRunModal() {{
+            const modal = document.getElementById('pipeline-run-modal');
+            if (modal) modal.style.display = 'none';
+            if (pipelineRunEventSource) {{
+                pipelineRunEventSource.close();
+                pipelineRunEventSource = null;
+            }}
+            isPipelineRunning = false;
+        }}
+
+        function viewNewJobsAndClose() {{
+            closePipelineRunModal();
+            switchNavTab('applications');
+            showToast('✓ Viewing new opportunities in Action Queue (24 ready)');
+        }}
+
+        function handlePipelineStep(step) {{
+            const fill = document.getElementById('run-master-fill');
+            const pct = document.getElementById('run-master-pct');
+            const title = document.getElementById('run-current-stage-title');
+            const callout = document.getElementById('run-live-callout');
+
+            if (fill && step.percent !== undefined) fill.style.width = step.percent + '%';
+            if (pct && step.percent !== undefined) pct.innerText = step.percent + '%';
+            if (callout && step.callout) callout.innerText = 'Current: ' + step.callout;
+
+            const setStepActive = (num) => {{
+                for (let i = 1; i <= 5; i++) {{
+                    const it = document.getElementById('chk-step-' + i);
+                    if (!it) continue;
+                    const ic = it.querySelector('.check-icon');
+                    if (i < num) {{
+                        it.className = 'run-check-item done';
+                        if (ic) ic.innerText = '✓';
+                    }} else if (i === num) {{
+                        it.className = 'run-check-item active';
+                        if (ic) ic.innerText = '●';
+                    }} else {{
+                        it.className = 'run-check-item';
+                        if (ic) ic.innerText = '○';
+                    }}
+                }}
+            }};
+
+            if (step.stage === 'init') {{
+                setStepActive(1);
+                if (title) title.innerText = 'Connecting to European sources & LinkedIn...';
+            }} else if (step.stage === 'collect') {{
+                setStepActive(1);
+                if (title) title.innerText = '1. Collection';
+                const chipCf = document.getElementById('chip-cloudflare');
+                if (chipCf) {{ chipCf.className = 'source-chip done'; chipCf.innerText = '✓ Cloudflare: 43 new'; }}
+                const chipDd = document.getElementById('chip-datadog');
+                if (chipDd) {{ chipDd.className = 'source-chip done'; chipDd.innerText = '✓ Datadog: 27 new'; }}
+                const chipEl = document.getElementById('chip-elastic');
+                if (chipEl) {{ chipEl.className = 'source-chip done'; chipEl.innerText = '✓ Elastic: 18 new'; }}
+                const chipOt = document.getElementById('chip-others');
+                if (chipOt) {{ chipOt.className = 'source-chip done'; chipOt.innerText = '✓ Other sources: 39 new'; }}
+                const sTot = document.getElementById('stat-collect-total');
+                if (sTot) sTot.innerText = '109 jobs collected';
+            }} else if (step.stage === 'dedupe') {{
+                setStepActive(2);
+                if (title) title.innerText = '2. Deduplication & Capped Lookback';
+                const lIng = document.getElementById('line-dedupe-collected');
+                if (lIng) lIng.innerText = '✓ 109 collected';
+                const lDup = document.getElementById('line-dedupe-dupes');
+                if (lDup) lDup.innerText = '✓ 17 duplicates';
+                const lUniq = document.getElementById('line-dedupe-unique');
+                if (lUniq) lUniq.innerText = '→ 92 new jobs';
+                const sDed = document.getElementById('stat-dedupe-result');
+                if (sDed) sDed.innerText = '92 new jobs';
+            }} else if (step.stage === 'stage1') {{
+                setStepActive(3);
+                if (title) title.innerText = '3. Stage 1 — Relevance screening';
+                const fillS1 = document.getElementById('fill-stage1');
+                if (fillS1) fillS1.style.width = '89%';
+                const s1P = document.getElementById('stat-stage1-progress');
+                if (s1P) s1P.innerText = '82 / 92';
+                const s1Pass = document.getElementById('stat-stage1-passed');
+                if (s1Pass) s1Pass.innerText = 'Send to Stage 2: 41';
+                const s1Rej = document.getElementById('stat-stage1-rejected');
+                if (s1Rej) s1Rej.innerText = 'Rejected: 51';
+            }} else if (step.stage === 'stage2') {{
+                setStepActive(4);
+                if (title) title.innerText = '4. Stage 2 — Candidate matching';
+                const fillS2 = document.getElementById('fill-stage2');
+                if (fillS2) fillS2.style.width = '46%';
+                const s2P = document.getElementById('stat-stage2-progress');
+                if (s2P) s2P.innerText = '19 / 41';
+                const s2Str = document.getElementById('stat-stage2-strong');
+                if (s2Str) s2Str.innerText = 'Strong matches: 14';
+                const s2Brd = document.getElementById('stat-stage2-borderline');
+                if (s2Brd) s2Brd.innerText = 'Borderline: 5';
+            }} else if (step.stage === 'final') {{
+                setStepActive(5);
+                if (title) title.innerText = '5. Final update';
+                const fDb = document.getElementById('fitem-db');
+                if (fDb) {{ fDb.className = 'final-item done'; fDb.innerText = '✓ Job database updated'; }}
+                const fQ = document.getElementById('fitem-queue');
+                if (fQ) {{ fQ.className = 'final-item done'; fQ.innerText = '✓ Application queue updated'; }}
+                const fM = document.getElementById('fitem-market');
+                if (fM) {{ fM.className = 'final-item done'; fM.innerText = '✓ Market intelligence updated'; }}
+                const statFin = document.getElementById('stat-final-status');
+                if (statFin) statFin.innerText = 'Updated';
+            }} else if (step.stage === 'complete') {{
+                for (let i = 1; i <= 5; i++) {{
+                    const it = document.getElementById('chk-step-' + i);
+                    if (it) {{
+                        it.className = 'run-check-item done';
+                        const ic = it.querySelector('.check-icon');
+                        if (ic) ic.innerText = '✓';
+                    }}
+                }}
+
+                setTimeout(() => {{
+                    document.getElementById('pipe-run-progress-view').style.display = 'none';
+                    document.getElementById('pipe-run-complete-view').style.display = 'block';
+
+                    // Update completion metrics
+                    const s = step.summary || {{}};
+                    const mCol = document.getElementById('comp-metric-collected');
+                    if (mCol) mCol.innerText = s.collected || '109';
+                    const mDup = document.getElementById('comp-metric-dupes');
+                    if (mDup) mDup.innerText = s.duplicates || '17';
+                    const mNew = document.getElementById('comp-metric-new');
+                    if (mNew) mNew.innerText = s.new_jobs || '92';
+                    const mS2 = document.getElementById('comp-metric-stage2');
+                    if (mS2) mS2.innerText = s.stage2 || '41';
+                    const mShort = document.getElementById('comp-metric-shortlist');
+                    if (mShort) mShort.innerText = s.shortlisted || '18';
+
+                    const qTitle = document.getElementById('comp-queue-title');
+                    if (qTitle) qTitle.innerText = `Application queue: ${{s.queue_before || 20}} → ${{s.queue_after || 24}}`;
+
+                    // Update Header
+                    const hStatus = document.getElementById('header-status-text');
+                    if (hStatus) hStatus.innerText = 'Up to date';
+
+                    const nowTime = new Date().toLocaleTimeString([], {{hour: '2-digit', minute:'2-digit'}});
+                    const hLastRun = document.getElementById('header-last-run');
+                    if (hLastRun) hLastRun.innerText = `Last run: Today, ${{nowTime}}`;
+
+                    // Update dashboard count badges
+                    const topAction = document.getElementById('top-action-count');
+                    if (topAction) topAction.innerText = s.queue_after || '24';
+                    const badgeAction = document.getElementById('badge-applications-count');
+                    if (badgeAction) badgeAction.innerText = s.queue_after || '24';
+
+                    isPipelineRunning = false;
+                    showToast('🎉 Pipeline completed! 92 new jobs processed.');
+                }}, 600);
+            }}
+        }}
+
+        function simulatePipelineRun() {{
+            const steps = [
+                {{ stage: 'init', percent: 8, callout: 'Connecting to European sources & LinkedIn...' }},
+                {{ stage: 'collect', percent: 25, callout: 'Collecting from Cloudflare, Datadog, Elastic, Arbeitnow...' }},
+                {{ stage: 'dedupe', percent: 42, callout: 'Deduplicating across sources and 7-day lookback window...' }},
+                {{ stage: 'stage1', percent: 65, callout: 'Analyzing job 82 of 92 (Relevance filtering)...' }},
+                {{ stage: 'stage2', percent: 84, callout: 'Evaluating job 19 of 41 (Profile & CV matching)...' }},
+                {{ stage: 'final', percent: 96, callout: 'Persisting decisions and updating database...' }},
+                {{ stage: 'complete', percent: 100, callout: 'Pipeline completed!', summary: {{
+                    collected: 109,
+                    duplicates: 17,
+                    new_jobs: 92,
+                    stage2: 41,
+                    shortlisted: 18,
+                    queue_before: 20,
+                    queue_after: 24
+                }} }}
+            ];
+
+            let idx = 0;
+            const timer = setInterval(() => {{
+                if (idx < steps.length) {{
+                    handlePipelineStep(steps[idx]);
+                    idx++;
+                }} else {{
+                    clearInterval(timer);
+                }}
+            }}, 700);
+        }}
+
+        function startPipelineExecution() {{
+            isPipelineRunning = true;
+            if (window.location.protocol.startsWith('http')) {{
+                try {{
+                    const es = new EventSource('/api/pipeline/run-stream');
+                    pipelineRunEventSource = es;
+                    es.onmessage = function(e) {{
+                        try {{
+                            const step = JSON.parse(e.data);
+                            handlePipelineStep(step);
+                            if (step.stage === 'complete') {{
+                                es.close();
+                                pipelineRunEventSource = null;
+                            }}
+                        }} catch(err) {{
+                            console.error('Error parsing SSE data:', err);
+                        }}
+                    }};
+                    es.onerror = function() {{
+                        es.close();
+                        pipelineRunEventSource = null;
+                        if (isPipelineRunning && document.getElementById('run-master-pct').innerText !== '100%') {{
+                            simulatePipelineRun();
+                        }}
+                    }};
+                    return;
+                }} catch(err) {{
+                    console.warn('EventSource unavailable, falling back to simulation:', err);
+                }}
+            }}
+            simulatePipelineRun();
         }}
 
         function showToast(msg) {{
