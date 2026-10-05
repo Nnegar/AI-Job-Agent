@@ -23,5 +23,7 @@ database/*.db
 reports/*.json
 reports/*.csv
 reports/*.zip
+reports/*.html
+reports/*.md
 
 runtime/*.json

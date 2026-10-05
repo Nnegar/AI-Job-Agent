@@ -211,3 +211,35 @@ CREATE TABLE IF NOT EXISTS cover_letter_drafts (
 
     UNIQUE(job_id)
 );
+
+
+
+-- =====================================================
+-- Market Intelligence & Skill Demand Tracking
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS job_market_skills (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    job_id INTEGER NOT NULL,
+
+    skill_name TEXT NOT NULL,
+
+    category TEXT NOT NULL,
+
+    is_gap INTEGER NOT NULL DEFAULT 0,
+
+    context TEXT,
+
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY(job_id)
+        REFERENCES jobs(id),
+
+    UNIQUE(job_id, skill_name, is_gap)
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_skills_name ON job_market_skills(skill_name);
+CREATE INDEX IF NOT EXISTS idx_market_skills_gap ON job_market_skills(is_gap);
+CREATE INDEX IF NOT EXISTS idx_market_skills_category ON job_market_skills(category);
