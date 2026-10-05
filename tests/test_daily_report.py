@@ -17,22 +17,32 @@ class TestDailyReport(unittest.TestCase):
 
     def test_report_generation(self):
         results = generate_daily_reports(reports_dir=self.temp_reports_dir)
-        self.assertIn("md_path", results)
-        self.assertIn("html_path", results)
-        self.assertTrue(results["md_path"].exists())
-        self.assertTrue(results["html_path"].exists())
+        self.assertIn('md_path', results)
+        self.assertIn('html_path', results)
+        self.assertTrue(results['md_path'].exists())
+        self.assertTrue(results['html_path'].exists())
 
-        md_text = results["md_path"].read_text(encoding="utf-8")
-        html_text = results["html_path"].read_text(encoding="utf-8")
+        md_text = results['md_path'].read_text(encoding='utf-8')
+        html_text = results['html_path'].read_text(encoding='utf-8')
 
-        self.assertIn("Daily Intelligence Report", md_text)
-        self.assertIn("Datadog", md_text)
-        self.assertIn("Cloudflare", md_text)
+        self.assertIn('Daily Intelligence Report', md_text)
+        self.assertIn('Datadog', md_text)
+        self.assertIn('Cloudflare', md_text)
 
-        self.assertIn("Daily Intelligence Report", html_text)
-        self.assertIn("btn-applied", html_text)
-        self.assertIn("updateJobStatus", html_text)
+        # Tab navigation buttons
+        self.assertIn('tab-btn-applications', html_text)
+        self.assertIn('tab-btn-pipeline', html_text)
+        self.assertIn('tab-btn-database', html_text)
+        self.assertIn('tab-btn-market', html_text)
+
+        # Pipeline table and interactive elements
+        self.assertIn('tab-pipeline', html_text)
+        self.assertIn('pipe-table-body', html_text)
+        self.assertIn('pipeline-stage-boxes', html_text)
+        self.assertIn('app-modal', html_text)
+        self.assertIn('saveModalNotes', html_text)
+        self.assertIn('updateJobStatus', html_text)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

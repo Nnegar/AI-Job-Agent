@@ -19,6 +19,11 @@ class TestApplicationRepoExt(unittest.TestCase):
         self.assertIn("offered", summary)
         self.assertIn("rejected", summary)
         self.assertIn("prepared", summary)
+        self.assertIn("all_active", summary)
+        self.assertEqual(
+            summary["all_active"],
+            summary["applied"] + summary["screening"] + summary["interview"] + summary["offered"]
+        )
 
         # Action queue should return jobs with decision = 'apply' and status = 'prepared'
         action_queue = repo.get_action_queue()
@@ -43,6 +48,17 @@ class TestApplicationRepoExt(unittest.TestCase):
         self.assertIn("sources", filters)
         self.assertIn("statuses", filters)
 
+        repo.close()
+
+    def test_update_notes(self):
+        repo = ApplicationRepository(self.db_path)
+        # Job 1 is used in integration tests
+        test_notes = '{"recruiter":"Bob","salary":"€120k"}'
+        success = repo.update_notes(1, test_notes)
+        self.assertTrue(success)
+        app = repo.get_by_job_id(1)
+        self.assertIsNotNone(app)
+        self.assertEqual(app["notes"], test_notes)
         repo.close()
 
     def test_status_normalization(self):

@@ -37,6 +37,7 @@ class TestServeDashboard(unittest.TestCase):
             self.assertIn("summary", data)
             self.assertIn("jobs", data)
             self.assertIn("applied", data["summary"])
+            self.assertIn("all_active", data["summary"])
 
     def test_get_database_jobs_paginated_api(self):
         req = urllib.request.Request(f"{self.base_url}/api/database/jobs?page=1&limit=10&search=engineering")
@@ -63,6 +64,21 @@ class TestServeDashboard(unittest.TestCase):
             self.assertEqual(data.get("status"), "applied")
             self.assertIn("summary", data)
 
+    def test_post_notes_only_api(self):
+        notes_content = json.dumps({"recruiter": "Alice Johnson", "target_comp": "€110,000"})
+        payload = json.dumps({"notes": notes_content}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/api/applications/1/status",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(data.get("success"))
+            self.assertIn("summary", data)
+
     def test_serve_html_dashboard(self):
         req = urllib.request.Request(f"{self.base_url}/")
         with urllib.request.urlopen(req) as resp:
@@ -71,7 +87,10 @@ class TestServeDashboard(unittest.TestCase):
             self.assertIn("AI Job Agent", content)
             self.assertIn("tab-btn-applications", content)
             self.assertIn("tab-btn-pipeline", content)
+            self.assertIn("tab-btn-database", content)
             self.assertIn("tab-btn-market", content)
+            self.assertIn("pipe-table-body", content)
+            self.assertIn("app-modal", content)
 
 
 if __name__ == "__main__":

@@ -127,19 +127,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
             try:
                 data = json.loads(body)
-                raw_status = data.get("status", "applied")
-                status = normalize_status(raw_status)
+                raw_status = data.get("status")
                 notes = data.get("notes")
                 applied_date = data.get("applied_date")
 
                 app_repo = ApplicationRepository()
-                # Upsert or update status
-                app_repo.upsert_application(
-                    job_id=job_id,
-                    status=status,
-                    notes=notes,
-                    applied_date=applied_date,
-                )
+                if raw_status:
+                    status = normalize_status(raw_status)
+                    app_repo.upsert_application(
+                        job_id=job_id,
+                        status=status,
+                        notes=notes,
+                        applied_date=applied_date,
+                    )
+                elif notes is not None:
+                    app_repo.update_notes(job_id=job_id, notes=notes)
+                    existing = app_repo.get_by_job_id(job_id)
+                    status = existing["status"] if existing else "applied"
+                else:
+                    status = "applied"
+                    app_repo.upsert_application(
+                        job_id=job_id,
+                        status=status,
+                    )
                 pipeline_summary = app_repo.get_pipeline_summary()
                 app_repo.close()
 

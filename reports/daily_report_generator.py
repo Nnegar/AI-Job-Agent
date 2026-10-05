@@ -2,7 +2,7 @@
 """
 Daily Digest and Interactive Report Generator.
 Generates:
-1. reports/daily_digest_YYYY-MM-DD.html (Curated 3-tab interactive dashboard: Action Queue, Application Pipeline Tracker, Market Intelligence)
+1. reports/daily_digest_YYYY-MM-DD.html (Complete 4-tab interactive dashboard: Action Queue, Application Pipeline Tracker with Details Modal, Job Database Archive, Market Intelligence)
 2. reports/daily_digest_YYYY-MM-DD.md (Clean markdown digest report)
 3. reports/latest_report.html (Symlink/copy for convenient local opening)
 """
@@ -181,6 +181,20 @@ def get_pipeline_jobs(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     return rows
 
 
+def get_all_database_jobs(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    """
+    Returns full database inventory for Tab 3 (Job Database Archive).
+    """
+    app_repo = ApplicationRepository()
+    result = app_repo.get_database_jobs(limit=10000)
+    app_repo.close()
+
+    for r in result["items"]:
+        r["freshness"] = format_freshness(r.get("posted_at"), r.get("collected_at"))
+
+    return result["items"]
+
+
 def generate_markdown_report(
     date_str: str,
     stats: Dict[str, Any],
@@ -193,13 +207,16 @@ def generate_markdown_report(
     lines.append(f"# AI Job Agent — Daily Intelligence Report ({date_str})\n")
     lines.append("## 1. Application Pipeline Summary\n")
     lines.append(f"- **Action Queue (Prepared)**: **{len(action_jobs)} jobs awaiting application**")
-    lines.append(f"- **Active Pipeline**: {pipeline_summary.get('applied', 0)} Applied | "
+    lines.append(f"- **Active Pipeline**: {pipeline_summary.get('all_active', 0)} Active | "
+                 f"{pipeline_summary.get('applied', 0)} Applied | "
                  f"{pipeline_summary.get('screening', 0)} Screening | "
                  f"{pipeline_summary.get('interview', 0)} Interview | "
                  f"{pipeline_summary.get('offered', 0)} Offers | "
-                 f"{pipeline_summary.get('rejected', 0)} Rejected")
+                 f"{pipeline_summary.get('rejected', 0)} Rejected | "
+                 f"{pipeline_summary.get('withdrawn', 0)} Withdrawn")
+    lines.append(f"- **Total Ingested Database**: {stats['total_jobs']} European opportunities\n")
 
-    lines.append("\n## 2. Action Queue — Top Applications Ready to Submit\n")
+    lines.append("## 2. Action Queue — Top Applications Ready to Submit\n")
     lines.append("| ID | Company | Role & Location | Freshness | Priority | Match | CV Variant | Action |")
     lines.append("|:---:|:---|:---|:---:|:---:|:---:|:---|:---|")
 
@@ -247,14 +264,15 @@ def generate_html_report(
     stats: Dict[str, Any],
     action_jobs: List[Dict[str, Any]],
     pipeline_jobs: List[Dict[str, Any]],
+    all_db_jobs: List[Dict[str, Any]],
     pipeline_summary: Dict[str, int],
     market: Dict[str, Any],
-    all_db_jobs: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     high_count = sum(1 for j in action_jobs if j["priority"] == "high")
     med_count = sum(1 for j in action_jobs if j["priority"] == "medium")
     action_count = len(action_jobs)
-    applied_count = len(pipeline_jobs)
+    total_db_count = len(all_db_jobs)
+    active_pipe_count = pipeline_summary.get("all_active", 0)
 
     # 1. Generate Action Queue Cards HTML (Tab 1)
     action_cards_html = []
@@ -344,69 +362,56 @@ def generate_html_report(
         """
         action_cards_html.append(card_html)
 
-    # 2. Generate Pipeline Cards HTML (Tab 2) - ONLY APPLIED JOBS!
-    pipeline_cards_html = []
+    # 2. Pipeline Jobs JSON Serialization for client-side table rendering, filtering, and details modal
+    pipeline_jobs_data = []
     for pj in pipeline_jobs:
-        jid = pj["id"]
-        stage = normalize_status(pj.get("app_status") or "applied")
-        applied_date_str = pj.get("applied_date") or "Recently"
-        url = pj.get("url") or "#"
         score = pj.get("final_score") or pj.get("match_score") or 0
-        letter_escaped = html.escape(pj.get("letter_text") or "No letter archived.")
+        pipeline_jobs_data.append({
+            "id": pj["id"],
+            "company": pj.get("company") or "Unknown",
+            "title": pj.get("title") or "Technical Role",
+            "location": pj.get("location") or "Europe / Remote",
+            "track": pj.get("primary_track") or "general",
+            "priority": pj.get("priority") or "medium",
+            "score": float(score),
+            "stage": normalize_status(pj.get("app_status") or "applied"),
+            "applied_date": pj.get("applied_date") or "",
+            "url": pj.get("url") or "#",
+            "cv": pj.get("recommended_cv") or "General_CV",
+            "letter": pj.get("letter_text") or "",
+            "notes": pj.get("notes") or "",
+            "created_at": pj.get("application_created_at") or "",
+        })
+    pipeline_jobs_json = json.dumps(pipeline_jobs_data)
 
-        p_comp = pj.get("company") or "Unknown Company"
-        p_title = pj.get("title") or "Technical Role"
-        p_loc = pj.get("location") or "Europe / Remote"
-        p_track = pj.get("primary_track") or "General"
+    # 3. All DB Jobs JSON Serialization for Tab 3 (Complete Historical Database)
+    db_jobs_data = []
+    for dj in all_db_jobs:
+        score = dj.get("match_score") or 0
+        db_jobs_data.append({
+            "id": dj["id"],
+            "company": dj.get("company") or "Unknown",
+            "title": dj.get("title") or "Role",
+            "location": dj.get("location") or "Europe",
+            "source": dj.get("source") or "greenhouse",
+            "track": dj.get("primary_track") or "general",
+            "priority": dj.get("priority") or "none",
+            "score": float(score),
+            "status": dj.get("app_status") or "discovered",
+            "freshness": dj["freshness"]["badge"],
+            "url": dj.get("url") or "#",
+        })
+    db_jobs_json = json.dumps(db_jobs_data)
 
-        pipeline_card = f"""
-        <div class="pipeline-card" id="pipe-card-{jid}" data-stage="{stage}" data-company="{html.escape(p_comp.lower())}">
-            <div class="pipe-header">
-                <div>
-                    <span class="company-badge">{html.escape(p_comp)}</span>
-                    <h4 class="pipe-title">{html.escape(p_title)}</h4>
-                    <div class="pipe-sub">
-                        <span>📍 {html.escape(p_loc)}</span> •
-                        <span>Track: <strong>{html.escape(p_track)}</strong></span> •
-                        <span class="score-pill">{score:.1f}% Match</span>
-                    </div>
-                </div>
-                <div class="pipe-status-col">
-                    <span class="stage-pill stage-{stage}" id="pipe-badge-{jid}">{stage.upper()}</span>
-                    <span class="applied-date-sub">Applied: {applied_date_str}</span>
-                </div>
-            </div>
+    # Distinct filters for dropdowns
+    companies_db = sorted(list(set(j["company"] for j in all_db_jobs if j.get("company"))))
+    tracks_db = sorted(list(set(j.get("primary_track", "general") for j in all_db_jobs if j.get("primary_track"))))
+    sources_db = sorted(list(set(j.get("source", "greenhouse") for j in all_db_jobs if j.get("source"))))
 
-            <div class="pipe-actions-bar">
-                <div class="pipe-stage-flow">
-                    <label class="flow-label">Change Stage:</label>
-                    <select class="stage-select" id="stage-select-{jid}" onchange="changePipelineStage({jid}, this.value)">
-                        <option value="applied" {'selected' if stage=='applied' else ''}>Applied</option>
-                        <option value="screening" {'selected' if stage=='screening' else ''}>Screening</option>
-                        <option value="interview" {'selected' if stage in ('interview', 'interviewing') else ''}>Interview</option>
-                        <option value="offered" {'selected' if stage in ('offered', 'offer') else ''}>Offered 🎉</option>
-                        <option value="rejected" {'selected' if stage=='rejected' else ''}>Rejected</option>
-                        <option value="withdrawn" {'selected' if stage=='withdrawn' else ''}>Withdrawn</option>
-                    </select>
-                </div>
+    pipe_companies = sorted(list(set(j["company"] for j in pipeline_jobs_data if j.get("company"))))
+    pipe_tracks = sorted(list(set(j.get("track", "general") for j in pipeline_jobs_data if j.get("track"))))
 
-                <div class="pipe-btn-group">
-                    <a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary-sm">Job Site ↗</a>
-                    <button class="btn btn-secondary-sm" onclick="toggleAccordion('pipe-letter-{jid}')">View Letter</button>
-                    { '<button class="btn btn-primary-sm" onclick="advanceStage(' + str(jid) + ', \'screening\')">➔ Move to Screening</button>' if stage == 'applied' else '' }
-                    { '<button class="btn btn-primary-sm" onclick="advanceStage(' + str(jid) + ', \'interview\')">➔ Move to Interview</button>' if stage == 'screening' else '' }
-                    { '<button class="btn btn-success-sm" onclick="advanceStage(' + str(jid) + ', \'offered\')">🎉 Offer Received</button>' if stage in ('interview', 'interviewing') else '' }
-                </div>
-            </div>
-
-            <div class="accordion-body" id="pipe-letter-{jid}">
-                <textarea class="letter-textarea-compact" readonly>{letter_escaped}</textarea>
-            </div>
-        </div>
-        """
-        pipeline_cards_html.append(pipeline_card)
-
-    # 3. Market Moving: Domain Momentum HTML (Tab 3)
+    # Market Moving: Domain Momentum HTML (Tab 4)
     domain_momentum_rows = []
     for dm in market.get("domain_momentum", []):
         domain_momentum_rows.append(f"""
@@ -422,7 +427,7 @@ def generate_html_report(
         </div>
         """)
 
-    # 4. Your Skill Position Table HTML (Tab 3)
+    # Your Skill Position Table HTML (Tab 4)
     skill_position_rows = []
     for sp in market.get("candidate_skill_position", []):
         skill_position_rows.append(f"""
@@ -454,7 +459,7 @@ def generate_html_report(
         </tr>
         """)
 
-    # 5. High ROI Skills Cards HTML (Tab 3)
+    # High ROI Skills Cards HTML (Tab 4)
     high_roi_cards = []
     for idx, g in enumerate(market.get("high_roi_skills_to_learn", []), start=1):
         companies_str = ", ".join(html.escape(c) for c in g["companies"])
@@ -513,7 +518,7 @@ def generate_html_report(
         }}
 
         .container {{
-            max-width: 1280px;
+            max-width: 1360px;
             margin: 0 auto;
             padding: 24px 20px;
         }}
@@ -792,8 +797,7 @@ def generate_html_report(
             padding: 2px 8px;
             border-radius: 9999px;
             display: inline-flex;
-            align-items: center;
-            gap: 4px;
+            align-items: gap: 4px;
         }}
         .fresh-today, .fresh-recent {{
             background: rgba(16, 185, 129, 0.15);
@@ -935,6 +939,9 @@ def generate_html_report(
             border-radius: 6px;
             cursor: pointer;
             text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }}
         .btn-secondary-sm:hover {{
             background: var(--surface-hover);
@@ -1084,105 +1091,118 @@ def generate_html_report(
             line-height: 1.6;
             resize: vertical;
         }}
-        .letter-textarea-compact {{
-            width: 100%;
-            height: 160px;
-            background: #070c18;
-            color: #e2e8f0;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 10px;
-            font-family: var(--font-family);
-            font-size: 12px;
-            line-height: 1.5;
-            resize: vertical;
-        }}
 
-        /* Pipeline (Tab 2) Styles */
-        .pipeline-metrics-row {{
+        /* Application Pipeline (Tab 2) Styles */
+        .pipeline-stage-boxes {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 14px;
-            margin-bottom: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 12px;
+            margin-bottom: 22px;
         }}
-        .pipe-metric-box {{
+        .stage-box {{
             background: var(--surface-color);
             border: 1px solid var(--border-color);
             border-radius: 10px;
-            padding: 14px 16px;
+            padding: 12px 14px;
             text-align: center;
             cursor: pointer;
             transition: all 0.2s;
         }}
-        .pipe-metric-box:hover, .pipe-metric-box.active {{
+        .stage-box:hover, .stage-box.active {{
             border-color: var(--accent-primary);
             background: var(--surface-hover);
         }}
-        .pipe-metric-title {{
-            font-size: 12px;
+        .stage-box.active {{
+            border-bottom: 3px solid var(--accent-primary);
+        }}
+        .stage-box-title {{
+            font-size: 11px;
             font-weight: 700;
             text-transform: uppercase;
             color: var(--text-secondary);
             letter-spacing: 0.5px;
         }}
-        .pipe-metric-val {{
-            font-size: 26px;
+        .stage-box-val {{
+            font-size: 24px;
             font-weight: 700;
             color: var(--text-primary);
-            margin-top: 4px;
+            margin-top: 2px;
         }}
 
-        .pipeline-card {{
+        .filter-grid-bar {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 18px;
+        }}
+        .filter-control-cell label {{
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }}
+        .filter-select, .filter-input {{
+            width: 100%;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }}
+        .filter-select:focus, .filter-input:focus {{
+            outline: none;
+            border-color: var(--accent-primary);
+        }}
+
+        .table-responsive-wrap {{
             background: var(--surface-card);
             border: 1px solid var(--border-color);
             border-radius: 12px;
-            padding: 18px 20px;
+            overflow-x: auto;
             margin-bottom: 16px;
-            transition: all 0.2s;
         }}
-        .pipeline-card:hover {{
-            border-color: #3b4d6b;
-        }}
-        .pipe-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-bottom: 12px;
-        }}
-        .pipe-title {{
-            font-size: 17px;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin: 2px 0 4px 0;
-        }}
-        .pipe-sub {{
+        .data-table {{
+            width: 100%;
+            border-collapse: collapse;
             font-size: 13px;
+            text-align: left;
+        }}
+        .data-table th {{
+            background: var(--surface-color);
             color: var(--text-secondary);
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
-        }}
-        .score-pill {{
-            background: rgba(59, 130, 246, 0.15);
-            color: #60a5fa;
-            border-radius: 4px;
-            padding: 1px 6px;
-            font-weight: 700;
             font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
         }}
-        .pipe-status-col {{
-            text-align: right;
+        .data-table td {{
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: middle;
         }}
+        .data-table tr:hover td {{
+            background: var(--surface-hover);
+        }}
+
+        /* Stage Badges */
         .stage-pill {{
             font-size: 11px;
             font-weight: 800;
-            padding: 4px 10px;
+            padding: 3px 8px;
             border-radius: 6px;
             letter-spacing: 0.5px;
             display: inline-block;
+            text-transform: uppercase;
         }}
         .stage-applied {{ background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }}
         .stage-screening {{ background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }}
@@ -1190,54 +1210,241 @@ def generate_html_report(
         .stage-offered, .stage-offer {{ background: rgba(245, 158, 11, 0.2); color: #fde047; border: 1px solid rgba(245, 158, 11, 0.4); }}
         .stage-rejected {{ background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }}
         .stage-withdrawn {{ background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }}
+        .stage-prepared {{ background: rgba(139, 92, 246, 0.15); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); }}
+        .stage-discovered {{ background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3); }}
 
-        .applied-date-sub {{
-            display: block;
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 4px;
-        }}
-        .pipe-actions-bar {{
+        /* Action Cell in Pipeline Table */
+        .pipe-table-actions {{
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            background: var(--surface-color);
-            padding: 10px 14px;
-            border-radius: 8px;
-            gap: 12px;
+            gap: 6px;
             flex-wrap: wrap;
         }}
-        .pipe-stage-flow {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }}
-        .flow-label {{
-            font-size: 12px;
-            color: var(--text-secondary);
-            font-weight: 600;
-        }}
-        .stage-select {{
+        .stage-dropdown-mini {{
             background: var(--bg-color);
             color: var(--text-primary);
             border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }}
+        .stage-dropdown-mini:focus {{
+            outline: none;
+            border-color: var(--accent-primary);
+        }}
+
+        /* Pagination Bar */
+        .pagination-bar {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            font-size: 13px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }}
+        .pagination-info {{
+            color: var(--text-secondary);
+        }}
+        .pagination-btns {{
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }}
+        .page-btn {{
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 5px 11px;
             border-radius: 6px;
-            padding: 5px 10px;
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
         }}
-        .stage-select:focus {{
+        .page-btn:hover {{
+            background: var(--surface-hover);
+        }}
+        .page-btn.active {{
+            background: var(--accent-primary);
+            color: #ffffff;
+            border-color: var(--accent-primary);
+        }}
+        .page-btn:disabled {{
+            opacity: 0.4;
+            cursor: not-allowed;
+        }}
+
+        /* Application Details Modal / Drawer */
+        .modal-overlay {{
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            backdrop-filter: blur(4px);
+            padding: 20px;
+        }}
+        .modal-overlay.open {{
+            display: flex;
+        }}
+        .modal-card {{
+            background: var(--surface-card);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            width: 100%;
+            max-width: 820px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+        }}
+        .modal-header {{
+            padding: 18px 22px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--surface-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }}
+        .modal-header h3 {{
+            font-size: 19px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }}
+        .modal-header p {{
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }}
+        .modal-close-btn {{
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 24px;
+            cursor: pointer;
+            line-height: 1;
+        }}
+        .modal-close-btn:hover {{
+            color: var(--text-primary);
+        }}
+        .modal-body {{
+            padding: 22px;
+            overflow-y: auto;
+            flex: 1;
+        }}
+        .modal-section-title {{
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 4px;
+        }}
+
+        /* Timeline in Modal */
+        .timeline-wrap {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface-color);
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+            gap: 12px;
+        }}
+        .timeline-step {{
+            text-align: center;
+            position: relative;
+            flex: 1;
+        }}
+        .timeline-dot {{
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--border-color);
+            margin: 0 auto 6px auto;
+        }}
+        .timeline-step.active .timeline-dot {{
+            background: var(--accent-primary);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+        }}
+        .timeline-step.passed .timeline-dot {{
+            background: var(--accent-green);
+        }}
+        .timeline-label {{
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }}
+        .timeline-step.active .timeline-label {{
+            color: var(--accent-primary);
+        }}
+
+        /* Notes CRM Fields */
+        .notes-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 16px;
+        }}
+        @media (max-width: 600px) {{
+            .notes-grid {{ grid-template-columns: 1fr; }}
+        }}
+        .notes-field-group label {{
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }}
+        .notes-input {{
+            width: 100%;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }}
+        .notes-textarea {{
+            width: 100%;
+            height: 90px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 13px;
+            resize: vertical;
+            line-height: 1.5;
+        }}
+        .notes-input:focus, .notes-textarea:focus {{
             outline: none;
             border-color: var(--accent-primary);
         }}
-        .pipe-btn-group {{
+        .modal-footer {{
+            padding: 14px 22px;
+            background: var(--surface-color);
+            border-top: 1px solid var(--border-color);
             display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 10px;
         }}
 
-        /* Market Intelligence (Tab 3) Styles */
+        /* Market Intelligence (Tab 4) Styles */
         .market-split-grid {{
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -1465,7 +1672,7 @@ def generate_html_report(
             transform: translateY(20px);
             transition: all 0.3s;
             pointer-events: none;
-            z-index: 1000;
+            z-index: 3000;
         }}
         .toast.show {{
             opacity: 1;
@@ -1494,13 +1701,13 @@ def generate_html_report(
             </div>
             <div class="stat-card card-green">
                 <span class="stat-label">Active Applications</span>
-                <span class="stat-value" id="top-pipeline-count">{applied_count}</span>
+                <span class="stat-value" id="top-pipeline-count">{active_pipe_count}</span>
                 <span class="stat-sub">{pipeline_summary.get('applied', 0)} Applied • {pipeline_summary.get('screening', 0)} Screening • {pipeline_summary.get('interview', 0)} Interview</span>
             </div>
             <div class="stat-card card-purple">
-                <span class="stat-label">Pipeline In Progress</span>
-                <span class="stat-value">{pipeline_summary.get('screening', 0) + pipeline_summary.get('interview', 0) + pipeline_summary.get('offered', 0)}</span>
-                <span class="stat-sub">{pipeline_summary.get('interview', 0)} Interviews • {pipeline_summary.get('offered', 0)} Offers</span>
+                <span class="stat-label">Job Database</span>
+                <span class="stat-value">{total_db_count}</span>
+                <span class="stat-sub">Ingested European Tech Roles</span>
             </div>
             <div class="stat-card card-amber">
                 <span class="stat-label">Target Markets</span>
@@ -1509,7 +1716,7 @@ def generate_html_report(
             </div>
         </div>
 
-        <!-- 3-Tab Navigation -->
+        <!-- 4-Tab Navigation -->
         <div class="nav-tabs">
             <button class="nav-tab-btn active" id="tab-btn-applications" onclick="switchNavTab('applications')">
                 📋 Applications (Action Queue)
@@ -1517,7 +1724,11 @@ def generate_html_report(
             </button>
             <button class="nav-tab-btn" id="tab-btn-pipeline" onclick="switchNavTab('pipeline')">
                 🚀 Application Pipeline (Tracker)
-                <span class="tab-count-badge" id="badge-pipeline-count">{applied_count}</span>
+                <span class="tab-count-badge" id="badge-pipeline-count">{len(pipeline_jobs)}</span>
+            </button>
+            <button class="nav-tab-btn" id="tab-btn-database" onclick="switchNavTab('database')">
+                🗄️ Job Database Archive
+                <span class="tab-count-badge">{total_db_count}</span>
             </button>
             <button class="nav-tab-btn" id="tab-btn-market" onclick="switchNavTab('market')">
                 📈 Market Intelligence
@@ -1567,47 +1778,235 @@ def generate_html_report(
                 <div>
                     <div class="section-intro-title">Application Pipeline Tracker</div>
                     <div class="section-intro-sub">
-                        Tracks only jobs you have actually applied to. Progress each application through Screening, Interview, and Offer stages.
+                        Real-time tracking of jobs you have submitted. Advance applications from Applied to Screening, Interview, and Offer stages.
                     </div>
                 </div>
             </div>
 
-            <!-- Pipeline Metric Boxes -->
-            <div class="pipeline-metrics-row">
-                <div class="pipe-metric-box active" onclick="filterPipelineStage('all', this)">
-                    <div class="pipe-metric-title">ALL APPLIED</div>
-                    <div class="pipe-metric-val" id="metric-pipe-all">{applied_count}</div>
+            <!-- Top Stage Counters (Click to Filter Table!) -->
+            <div class="pipeline-stage-boxes">
+                <div class="stage-box active" id="sbox-all-active" onclick="filterPipelineStage('all_active', this)">
+                    <div class="stage-box-title">ALL ACTIVE</div>
+                    <div class="stage-box-val" id="cnt-pipe-active">{pipeline_summary.get('all_active', 0)}</div>
                 </div>
-                <div class="pipe-metric-box" onclick="filterPipelineStage('applied', this)">
-                    <div class="pipe-metric-title">SUBMITTED</div>
-                    <div class="pipe-metric-val" id="metric-pipe-applied">{pipeline_summary.get('applied', 0)}</div>
+                <div class="stage-box" id="sbox-applied" onclick="filterPipelineStage('applied', this)">
+                    <div class="stage-box-title">APPLIED</div>
+                    <div class="stage-box-val" id="cnt-pipe-applied">{pipeline_summary.get('applied', 0)}</div>
                 </div>
-                <div class="pipe-metric-box" onclick="filterPipelineStage('screening', this)">
-                    <div class="pipe-metric-title">SCREENING</div>
-                    <div class="pipe-metric-val" id="metric-pipe-screening">{pipeline_summary.get('screening', 0)}</div>
+                <div class="stage-box" id="sbox-screening" onclick="filterPipelineStage('screening', this)">
+                    <div class="stage-box-title">SCREENING</div>
+                    <div class="stage-box-val" id="cnt-pipe-screening">{pipeline_summary.get('screening', 0)}</div>
                 </div>
-                <div class="pipe-metric-box" onclick="filterPipelineStage('interview', this)">
-                    <div class="pipe-metric-title">INTERVIEW</div>
-                    <div class="pipe-metric-val" id="metric-pipe-interview">{pipeline_summary.get('interview', 0)}</div>
+                <div class="stage-box" id="sbox-interview" onclick="filterPipelineStage('interview', this)">
+                    <div class="stage-box-title">INTERVIEW</div>
+                    <div class="stage-box-val" id="cnt-pipe-interview">{pipeline_summary.get('interview', 0)}</div>
                 </div>
-                <div class="pipe-metric-box" onclick="filterPipelineStage('offered', this)">
-                    <div class="pipe-metric-title">OFFERS</div>
-                    <div class="pipe-metric-val" id="metric-pipe-offered">{pipeline_summary.get('offered', 0)}</div>
+                <div class="stage-box" id="sbox-offered" onclick="filterPipelineStage('offered', this)">
+                    <div class="stage-box-title">OFFERS</div>
+                    <div class="stage-box-val" id="cnt-pipe-offered">{pipeline_summary.get('offered', 0)}</div>
                 </div>
-                <div class="pipe-metric-box" onclick="filterPipelineStage('rejected', this)">
-                    <div class="pipe-metric-title">REJECTED</div>
-                    <div class="pipe-metric-val" id="metric-pipe-rejected">{pipeline_summary.get('rejected', 0)}</div>
+                <div class="stage-box" id="sbox-rejected" onclick="filterPipelineStage('rejected', this)">
+                    <div class="stage-box-title">REJECTED</div>
+                    <div class="stage-box-val" id="cnt-pipe-rejected">{pipeline_summary.get('rejected', 0)}</div>
+                </div>
+                <div class="stage-box" id="sbox-withdrawn" onclick="filterPipelineStage('withdrawn', this)">
+                    <div class="stage-box-title">WITHDRAWN</div>
+                    <div class="stage-box-val" id="cnt-pipe-withdrawn">{pipeline_summary.get('withdrawn', 0)}</div>
                 </div>
             </div>
 
-            <!-- Pipeline Cards Container (ONLY APPLIED JOBS) -->
-            <div id="pipeline-cards-container">
-                {"".join(pipeline_cards_html) if pipeline_cards_html else '<div class="empty-state" style="text-align:center; padding:40px; color:var(--text-secondary);">No applications in tracker yet. Click [✓ Mark as Applied] on any job in the Applications tab to track it here.</div>'}
+            <!-- Pipeline Filter Bar -->
+            <div class="filter-grid-bar">
+                <div class="filter-control-cell">
+                    <label>Search Applications</label>
+                    <input type="text" class="filter-input" id="pipe-search" placeholder="Company, title, city..." oninput="filterPipelineTable()">
+                </div>
+                <div class="filter-control-cell">
+                    <label>Stage</label>
+                    <select class="filter-select" id="pipe-filter-stage" onchange="filterPipelineTable()">
+                        <option value="all_active">All Active (Applied, Screen, Interview, Offer)</option>
+                        <option value="all">All Applications (Including Exits)</option>
+                        <option value="applied">Applied</option>
+                        <option value="screening">Screening</option>
+                        <option value="interview">Interview</option>
+                        <option value="offered">Offered 🎉</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="withdrawn">Withdrawn</option>
+                    </select>
+                </div>
+                <div class="filter-control-cell">
+                    <label>Company</label>
+                    <select class="filter-select" id="pipe-filter-company" onchange="filterPipelineTable()">
+                        <option value="all">All Companies</option>
+                        {"".join(f'<option value="{html.escape(c)}">{html.escape(c)}</option>' for c in pipe_companies)}
+                    </select>
+                </div>
+                <div class="filter-control-cell">
+                    <label>Career Track</label>
+                    <select class="filter-select" id="pipe-filter-track" onchange="filterPipelineTable()">
+                        <option value="all">All Tracks</option>
+                        {"".join(f'<option value="{html.escape(t)}">{html.escape(t)}</option>' for t in pipe_tracks)}
+                    </select>
+                </div>
+                <div class="filter-control-cell">
+                    <label>Priority</label>
+                    <select class="filter-select" id="pipe-filter-priority" onchange="filterPipelineTable()">
+                        <option value="all">All Priorities</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="filter-control-cell" style="max-width: 120px;">
+                    <label>Per Page</label>
+                    <select class="filter-select" id="pipe-page-size" onchange="changePipePageSize(this.value)">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Pipeline Paginated Table -->
+            <div class="table-responsive-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">ID</th>
+                            <th>Company</th>
+                            <th>Job Title</th>
+                            <th>Location</th>
+                            <th>Track</th>
+                            <th>Match</th>
+                            <th>Priority</th>
+                            <th>Stage</th>
+                            <th>Applied</th>
+                            <th>Next Action</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pipe-table-body">
+                        <!-- Populated dynamically by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pipeline Pagination Bar -->
+            <div class="pagination-bar">
+                <div class="pagination-info" id="pipe-pagination-info">Showing 1–25 applications</div>
+                <div class="pagination-btns" id="pipe-pagination-controls">
+                    <!-- Populated dynamically by JavaScript -->
+                </div>
             </div>
         </div>
 
         <!-- ======================================================== -->
-        <!-- TAB 3: REDESIGNED MARKET INTELLIGENCE                    -->
+        <!-- TAB 3: COMPLETE JOB DATABASE ARCHIVE                     -->
+        <!-- ======================================================== -->
+        <div id="tab-database" class="tab-content" style="display: none;">
+            <div class="section-intro-bar">
+                <div>
+                    <div class="section-intro-title">Complete Job Database Archive ({total_db_count} Jobs)</div>
+                    <div class="section-intro-sub">
+                        Master archive of every job collected by the AI across European sources. Cleanly paginated for high-volume historical scale.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Database Filters Grid -->
+            <div class="filter-grid-bar">
+                <div class="filter-control-cell">
+                    <label>Search Keyword</label>
+                    <input type="text" class="filter-input" id="db-search" placeholder="Company, title, skill..." oninput="filterDatabaseTable()">
+                </div>
+                <div class="filter-control-cell">
+                    <label>Status</label>
+                    <select class="filter-select" id="db-filter-status" onchange="filterDatabaseTable()">
+                        <option value="all">All Statuses</option>
+                        <option value="prepared">Prepared (Ready in Queue)</option>
+                        <option value="applied">Applied</option>
+                        <option value="screening">Screening</option>
+                        <option value="interview">Interview</option>
+                        <option value="offered">Offered</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="discovered">Discovered (Unscreened)</option>
+                    </select>
+                </div>
+                <div class="filter-control-cell">
+                    <label>Company</label>
+                    <select class="filter-select" id="db-filter-company" onchange="filterDatabaseTable()">
+                        <option value="all">All Companies</option>
+                        {"".join(f'<option value="{html.escape(c)}">{html.escape(c)}</option>' for c in companies_db)}
+                    </select>
+                </div>
+                <div class="filter-control-cell">
+                    <label>Career Track</label>
+                    <select class="filter-select" id="db-filter-track" onchange="filterDatabaseTable()">
+                        <option value="all">All Tracks</option>
+                        {"".join(f'<option value="{html.escape(t)}">{html.escape(t)}</option>' for t in tracks_db)}
+                    </select>
+                </div>
+                <div class="filter-control-cell">
+                    <label>Priority</label>
+                    <select class="filter-select" id="db-filter-priority" onchange="filterDatabaseTable()">
+                        <option value="all">All Priorities</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+                <div class="filter-control-cell">
+                    <label>Source</label>
+                    <select class="filter-select" id="db-filter-source" onchange="filterDatabaseTable()">
+                        <option value="all">All Sources</option>
+                        {"".join(f'<option value="{html.escape(s)}">{html.escape(s)}</option>' for s in sources_db)}
+                    </select>
+                </div>
+                <div class="filter-control-cell" style="max-width: 120px;">
+                    <label>Per Page</label>
+                    <select class="filter-select" id="db-page-size" onchange="changeDbPageSize(this.value)">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Database Table -->
+            <div class="table-responsive-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">ID</th>
+                            <th>Company</th>
+                            <th>Job Title</th>
+                            <th>Location</th>
+                            <th>Track</th>
+                            <th>Score</th>
+                            <th>Priority</th>
+                            <th>Status</th>
+                            <th>Freshness</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="db-table-body">
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Database Pagination Bar -->
+            <div class="pagination-bar">
+                <div class="pagination-info" id="db-pagination-info">Showing 1–25 of {total_db_count} jobs</div>
+                <div class="pagination-btns" id="db-pagination-controls">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- TAB 4: REDESIGNED MARKET INTELLIGENCE                    -->
         <!-- ======================================================== -->
         <div id="tab-market" class="tab-content" style="display: none;">
             <div class="market-split-grid">
@@ -1660,11 +2059,86 @@ def generate_html_report(
         </div>
     </div>
 
+    <!-- Application Details & Notes Modal / Drawer -->
+    <div class="modal-overlay" id="app-modal" onclick="closeModalOnOverlay(event)">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div>
+                    <h3 id="modal-title">Job Title</h3>
+                    <p id="modal-sub">Company • Location • Track</p>
+                </div>
+                <button class="modal-close-btn" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <!-- Timeline -->
+                <div class="modal-section-title">Application Timeline</div>
+                <div class="timeline-wrap" id="modal-timeline">
+                    <!-- Populated dynamically -->
+                </div>
+
+                <!-- Notes & Recruiter CRM -->
+                <div class="modal-section-title">Recruiter Contact & Interview Notes</div>
+                <div class="notes-grid">
+                    <div class="notes-field-group">
+                        <label>Recruiter / Point of Contact</label>
+                        <input type="text" class="notes-input" id="modal-notes-recruiter" placeholder="Name, Email, or LinkedIn URL">
+                    </div>
+                    <div class="notes-field-group">
+                        <label>Target Compensation / Salary</label>
+                        <input type="text" class="notes-input" id="modal-notes-salary" placeholder="e.g. €75,000 - €85,000 + equity">
+                    </div>
+                    <div class="notes-field-group">
+                        <label>Next Follow-Up Date</label>
+                        <input type="date" class="notes-input" id="modal-notes-followup">
+                    </div>
+                    <div class="notes-field-group">
+                        <label>Careers Portal URL</label>
+                        <input type="text" class="notes-input" id="modal-notes-url" readonly>
+                    </div>
+                </div>
+
+                <div class="notes-field-group" style="margin-bottom: 20px;">
+                    <label>Interview Notes, Technical Questions & Feedback</label>
+                    <textarea class="notes-textarea" id="modal-notes-text" placeholder="Record interview feedback, topics discussed, architecture questions..."></textarea>
+                </div>
+
+                <!-- Cover Letter Used -->
+                <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Submitted Cover Letter Package</span>
+                    <button class="btn btn-secondary-sm" onclick="copyModalLetter()">📋 Copy Letter</button>
+                </div>
+                <textarea class="letter-textarea" id="modal-letter-text" readonly style="height: 180px;"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-copy" onclick="closeModal()">Close</button>
+                <button class="btn btn-applied" id="modal-btn-save" onclick="saveModalNotes()">💾 Save Notes</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div class="toast" id="toast">Notification message</div>
 
     <!-- Client-Side State & Logic -->
     <script>
+        // Data Payloads
+        const ALL_PIPELINE_JOBS = {pipeline_jobs_json};
+        const ALL_DB_JOBS = {db_jobs_json};
+
+        // Pipeline Table State
+        let filteredPipelineJobs = [...ALL_PIPELINE_JOBS];
+        let pipeCurrentPage = 1;
+        let pipePageSize = 25;
+        let activeStageFilter = 'all_active';
+
+        // DB Table State
+        let filteredDbJobs = [...ALL_DB_JOBS];
+        let dbCurrentPage = 1;
+        let dbPageSize = 25;
+
+        // Current Active Modal Job
+        let currentModalJobId = null;
+
         // Navigation Tabs
         function switchNavTab(tabName) {{
             document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
@@ -1674,6 +2148,12 @@ def generate_html_report(
             const content = document.getElementById('tab-' + tabName);
             if (btn) btn.classList.add('active');
             if (content) content.style.display = 'block';
+
+            if (tabName === 'pipeline') {{
+                renderPipelineTable();
+            }} else if (tabName === 'database') {{
+                renderDatabaseTable();
+            }}
         }}
 
         // Accordion Toggle
@@ -1724,26 +2204,59 @@ def generate_html_report(
                 }}, 350);
             }}
 
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            // Add to pipeline data locally
+            const existingPipeIndex = ALL_PIPELINE_JOBS.findIndex(j => j.id === jobId);
+            if (existingPipeIndex >= 0) {{
+                ALL_PIPELINE_JOBS[existingPipeIndex].stage = 'applied';
+                ALL_PIPELINE_JOBS[existingPipeIndex].applied_date = todayStr;
+            }} else {{
+                // Find in DB
+                const dbJob = ALL_DB_JOBS.find(j => j.id === jobId) || {{}};
+                ALL_PIPELINE_JOBS.unshift({{
+                    id: jobId,
+                    company: company || dbJob.company || 'Company',
+                    title: title || dbJob.title || 'Role',
+                    location: dbJob.location || 'Europe',
+                    track: dbJob.track || 'telecom_ai',
+                    priority: dbJob.priority || 'high',
+                    score: dbJob.score || 85.0,
+                    stage: 'applied',
+                    applied_date: todayStr,
+                    url: dbJob.url || '#',
+                    cv: 'General_CV',
+                    letter: '',
+                    notes: '',
+                }});
+            }}
+
+            // Update in DB records
+            const dbJobRef = ALL_DB_JOBS.find(j => j.id === jobId);
+            if (dbJobRef) dbJobRef.status = 'applied';
+
             try {{
                 const res = await fetch(`/api/applications/${{jobId}}/status`, {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ status: 'applied' }})
+                    body: JSON.stringify({{ status: 'applied', applied_date: todayStr }})
                 }});
 
                 if (res.ok) {{
                     const data = await res.json();
                     showToast(`✓ Job #${{jobId}} (${{company}}) marked as APPLIED and entered Pipeline!`);
-                    updatePipelineCounters(data.summary);
+                    updateStageCountersFromSummary(data.summary);
                 }} else {{
                     throw new Error('API server not running');
                 }}
             }} catch (err) {{
-                // Fallback for static HTML view
                 localStorage.setItem(`app_status_${{jobId}}`, 'applied');
                 showToast(`✓ Job #${{jobId}} (${{company}}) marked as APPLIED (Saved locally)!`);
-                incrementLocalApplied();
+                updateStageCountersLocally();
             }}
+
+            filterPipelineTable();
+            renderDatabaseTable();
         }}
 
         function decrementActionQueueCount() {{
@@ -1759,49 +2272,164 @@ def generate_html_report(
             }}
         }}
 
-        function updatePipelineCounters(summary) {{
-            if (!summary) return;
-            const appliedEl = document.getElementById('metric-pipe-applied');
-            const screenEl = document.getElementById('metric-pipe-screening');
-            const interviewEl = document.getElementById('metric-pipe-interview');
-            const offerEl = document.getElementById('metric-pipe-offered');
-            const rejectEl = document.getElementById('metric-pipe-rejected');
-            const allEl = document.getElementById('metric-pipe-all');
-            const topEl = document.getElementById('top-pipeline-count');
-            const badgeEl = document.getElementById('badge-pipeline-count');
+        // ========================================================
+        // PIPELINE TABLE, STAGE FILTERS & PAGINATION
+        // ========================================================
+        function filterPipelineStage(stageKey, el) {{
+            document.querySelectorAll('.stage-box').forEach(b => b.classList.remove('active'));
+            if (el) el.classList.add('active');
 
-            if (appliedEl) appliedEl.innerText = summary.applied || 0;
-            if (screenEl) screenEl.innerText = summary.screening || 0;
-            if (interviewEl) interviewEl.innerText = summary.interview || 0;
-            if (offerEl) offerEl.innerText = summary.offered || 0;
-            if (rejectEl) rejectEl.innerText = summary.rejected || 0;
-            if (allEl) allEl.innerText = summary.total_pipeline || 0;
-            if (badgeEl) badgeEl.innerText = summary.total_pipeline || 0;
-            if (topEl) topEl.innerText = summary.total_pipeline || 0;
+            activeStageFilter = stageKey;
+            const selectEl = document.getElementById('pipe-filter-stage');
+            if (selectEl) selectEl.value = stageKey;
+
+            filterPipelineTable();
         }}
 
-        function incrementLocalApplied() {{
-            const appliedEl = document.getElementById('metric-pipe-applied');
-            const allEl = document.getElementById('metric-pipe-all');
-            const topEl = document.getElementById('top-pipeline-count');
-            const badgeEl = document.getElementById('badge-pipeline-count');
+        function filterPipelineTable() {{
+            const search = (document.getElementById('pipe-search').value || '').toLowerCase().trim();
+            const stage = (document.getElementById('pipe-filter-stage').value || activeStageFilter).toLowerCase();
+            const company = (document.getElementById('pipe-filter-company').value || 'all').toLowerCase();
+            const track = (document.getElementById('pipe-filter-track').value || 'all').toLowerCase();
+            const priority = (document.getElementById('pipe-filter-priority').value || 'all').toLowerCase();
 
-            const newCount = (parseInt(allEl.innerText, 10) || 0) + 1;
-            if (appliedEl) appliedEl.innerText = (parseInt(appliedEl.innerText, 10) || 0) + 1;
-            if (allEl) allEl.innerText = newCount;
-            if (topEl) topEl.innerText = newCount;
-            if (badgeEl) badgeEl.innerText = newCount;
+            filteredPipelineJobs = ALL_PIPELINE_JOBS.filter(j => {{
+                if (search) {{
+                    const fullText = (j.company + ' ' + j.title + ' ' + j.location + ' ' + j.track).toLowerCase();
+                    if (!fullText.includes(search)) return false;
+                }}
+                if (stage === 'all_active') {{
+                    if (['rejected', 'withdrawn'].includes(j.stage)) return false;
+                }} else if (stage !== 'all') {{
+                    if (j.stage !== stage) return false;
+                }}
+                if (company !== 'all' && j.company.toLowerCase() !== company) return false;
+                if (track !== 'all' && (j.track || '').toLowerCase() !== track) return false;
+                if (priority !== 'all' && (j.priority || '').toLowerCase() !== priority) return false;
+                return true;
+            }});
+
+            pipeCurrentPage = 1;
+            renderPipelineTable();
         }}
 
-        // Pipeline Stage Transition
-        async function changePipelineStage(jobId, newStage) {{
-            const card = document.getElementById('pipe-card-' + jobId);
-            const badge = document.getElementById('pipe-badge-' + jobId);
-            if (badge) {{
-                badge.className = `stage-pill stage-${{newStage}}`;
-                badge.innerText = newStage.toUpperCase();
+        function renderPipelineTable() {{
+            const tbody = document.getElementById('pipe-table-body');
+            const info = document.getElementById('pipe-pagination-info');
+            const controls = document.getElementById('pipe-pagination-controls');
+            if (!tbody) return;
+
+            const total = filteredPipelineJobs.length;
+            const totalPages = Math.max(1, Math.ceil(total / pipePageSize));
+            const startIdx = (pipeCurrentPage - 1) * pipePageSize;
+            const endIdx = Math.min(startIdx + pipePageSize, total);
+            const pageItems = filteredPipelineJobs.slice(startIdx, endIdx);
+
+            info.innerText = `Showing ${{total === 0 ? 0 : startIdx + 1}}–${{endIdx}} of ${{total}} applications`;
+
+            let rowsHtml = '';
+            for (const j of pageItems) {{
+                const prioClass = j.priority === 'high' ? 'priority-high' : (j.priority === 'medium' ? 'priority-medium' : '');
+                const prioLabel = (j.priority || 'medium').toUpperCase();
+                const appliedDateStr = j.applied_date ? j.applied_date.replace(/T.*/, '') : 'Recently';
+
+                // Next Action button
+                let nextBtnHtml = '';
+                if (j.stage === 'applied') {{
+                    nextBtnHtml = `<button class="btn btn-primary-sm" onclick="advanceStageDirect(${{j.id}}, 'screening')">➔ Move to Screening</button>`;
+                }} else if (j.stage === 'screening') {{
+                    nextBtnHtml = `<button class="btn btn-primary-sm" onclick="advanceStageDirect(${{j.id}}, 'interview')">➔ Move to Interview</button>`;
+                }} else if (j.stage === 'interview' || j.stage === 'interviewing') {{
+                    nextBtnHtml = `<button class="btn btn-success-sm" onclick="advanceStageDirect(${{j.id}}, 'offered')">🎉 Offer Received</button>`;
+                }} else if (j.stage === 'offered') {{
+                    nextBtnHtml = `<span style="color:var(--accent-green); font-size:12px; font-weight:700;">🏆 Offer Received</span>`;
+                }} else {{
+                    nextBtnHtml = `<span style="color:var(--text-muted); font-size:12px;">—</span>`;
+                }}
+
+                rowsHtml += `
+                <tr id="pipe-row-${{j.id}}">
+                    <td><strong>#${{j.id}}</strong></td>
+                    <td><strong>${{escapeHtml(j.company)}}</strong></td>
+                    <td><a href="${{escapeHtml(j.url)}}" target="_blank" rel="noopener noreferrer" style="color:var(--text-primary); text-decoration:none; font-weight:600;">${{escapeHtml(j.title)}}</a></td>
+                    <td><span style="color:var(--text-secondary);">${{escapeHtml(j.location)}}</span></td>
+                    <td><span class="track-tag" style="font-size:11px;">${{escapeHtml(j.track)}}</span></td>
+                    <td><span class="score-pill">${{parseFloat(j.score).toFixed(1)}}%</span></td>
+                    <td><span class="badge ${{prioClass}}" style="font-size:10px;">${{prioLabel}}</span></td>
+                    <td>
+                        <span class="stage-pill stage-${{j.stage}}" id="pipe-stage-pill-${{j.id}}">${{j.stage.toUpperCase()}}</span>
+                    </td>
+                    <td><span style="color:var(--text-secondary); font-size:12px;">${{appliedDateStr}}</span></td>
+                    <td>
+                        <div class="pipe-table-actions">
+                            ${{nextBtnHtml}}
+                            <select class="stage-dropdown-mini" onchange="changePipelineStage(${{j.id}}, this.value)">
+                                <option value="applied" ${{j.stage === 'applied' ? 'selected' : ''}}>Applied</option>
+                                <option value="screening" ${{j.stage === 'screening' ? 'selected' : ''}}>Screening</option>
+                                <option value="interview" ${{['interview', 'interviewing'].includes(j.stage) ? 'selected' : ''}}>Interview</option>
+                                <option value="offered" ${{['offered', 'offer'].includes(j.stage) ? 'selected' : ''}}>Offered 🎉</option>
+                                <option value="rejected" ${{j.stage === 'rejected' ? 'selected' : ''}}>Rejected</option>
+                                <option value="withdrawn" ${{j.stage === 'withdrawn' ? 'selected' : ''}}>Withdrawn</option>
+                            </select>
+                        </div>
+                    </td>
+                    <td>
+                        <button class="btn btn-secondary-sm" onclick="openDetailsModal(${{j.id}})">📝 Details</button>
+                    </td>
+                </tr>
+                `;
             }}
-            if (card) card.setAttribute('data-stage', newStage);
+
+            tbody.innerHTML = rowsHtml || '<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--text-secondary);">No applications match the selected filter. Click [✓ Mark as Applied] on the Applications tab to add applications.</td></tr>';
+
+            // Pagination Controls
+            let pBtns = '';
+            pBtns += `<button class="page-btn" onclick="changePipePage(${{pipeCurrentPage - 1}})" ${{pipeCurrentPage <= 1 ? 'disabled' : ''}}>« Prev</button>`;
+
+            const maxVisible = 5;
+            let startP = Math.max(1, pipeCurrentPage - 2);
+            let endP = Math.min(totalPages, startP + maxVisible - 1);
+            if (endP - startP < maxVisible - 1) {{
+                startP = Math.max(1, endP - maxVisible + 1);
+            }}
+
+            for (let p = startP; p <= endP; p++) {{
+                pBtns += `<button class="page-btn ${{p === pipeCurrentPage ? 'active' : ''}}" onclick="changePipePage(${{p}})">${{p}}</button>`;
+            }}
+
+            pBtns += `<button class="page-btn" onclick="changePipePage(${{pipeCurrentPage + 1}})" ${{pipeCurrentPage >= totalPages ? 'disabled' : ''}}>Next »</button>`;
+            controls.innerHTML = pBtns;
+        }}
+
+        function changePipePage(newPage) {{
+            const totalPages = Math.max(1, Math.ceil(filteredPipelineJobs.length / pipePageSize));
+            if (newPage < 1 || newPage > totalPages) return;
+            pipeCurrentPage = newPage;
+            renderPipelineTable();
+        }}
+
+        function changePipePageSize(newSize) {{
+            pipePageSize = parseInt(newSize, 10) || 25;
+            pipeCurrentPage = 1;
+            renderPipelineTable();
+        }}
+
+        function advanceStageDirect(jobId, newStage) {{
+            changePipelineStage(jobId, newStage);
+        }}
+
+        async function changePipelineStage(jobId, newStage) {{
+            const job = ALL_PIPELINE_JOBS.find(j => j.id === jobId);
+            if (job) {{
+                job.stage = newStage;
+            }}
+
+            // Update in DB records
+            const dbJobRef = ALL_DB_JOBS.find(j => j.id === jobId);
+            if (dbJobRef) dbJobRef.status = newStage;
+
+            updateStageCountersLocally();
+            renderPipelineTable();
 
             try {{
                 const res = await fetch(`/api/applications/${{jobId}}/status`, {{
@@ -1812,7 +2440,7 @@ def generate_html_report(
                 if (res.ok) {{
                     const data = await res.json();
                     showToast(`✓ Job #${{jobId}} transitioned to ${{newStage.toUpperCase()}}!`);
-                    updatePipelineCounters(data.summary);
+                    if (data.summary) updateStageCountersFromSummary(data.summary);
                 }}
             }} catch (err) {{
                 localStorage.setItem(`app_status_${{jobId}}`, newStage);
@@ -1820,13 +2448,287 @@ def generate_html_report(
             }}
         }}
 
-        function advanceStage(jobId, targetStage) {{
-            const select = document.getElementById('stage-select-' + jobId);
-            if (select) select.value = targetStage;
-            changePipelineStage(jobId, targetStage);
+        function updateStageCountersLocally() {{
+            let active = 0, applied = 0, screening = 0, interview = 0, offered = 0, rejected = 0, withdrawn = 0;
+            ALL_PIPELINE_JOBS.forEach(j => {{
+                const s = j.stage;
+                if (s === 'applied') applied++;
+                else if (s === 'screening') screening++;
+                else if (['interview', 'interviewing'].includes(s)) interview++;
+                else if (['offered', 'offer'].includes(s)) offered++;
+                else if (s === 'rejected') rejected++;
+                else if (s === 'withdrawn') withdrawn++;
+            }});
+            active = applied + screening + interview + offered;
+
+            const cntActive = document.getElementById('cnt-pipe-active');
+            const cntApplied = document.getElementById('cnt-pipe-applied');
+            const cntScreening = document.getElementById('cnt-pipe-screening');
+            const cntInterview = document.getElementById('cnt-pipe-interview');
+            const cntOffered = document.getElementById('cnt-pipe-offered');
+            const cntRejected = document.getElementById('cnt-pipe-rejected');
+            const cntWithdrawn = document.getElementById('cnt-pipe-withdrawn');
+            const topPipe = document.getElementById('top-pipeline-count');
+            const badgePipe = document.getElementById('badge-pipeline-count');
+
+            if (cntActive) cntActive.innerText = active;
+            if (cntApplied) cntApplied.innerText = applied;
+            if (cntScreening) cntScreening.innerText = screening;
+            if (cntInterview) cntInterview.innerText = interview;
+            if (cntOffered) cntOffered.innerText = offered;
+            if (cntRejected) cntRejected.innerText = rejected;
+            if (cntWithdrawn) cntWithdrawn.innerText = withdrawn;
+            if (topPipe) topPipe.innerText = active;
+            if (badgePipe) badgePipe.innerText = ALL_PIPELINE_JOBS.length;
         }}
 
-        // Filter Action Queue
+        function updateStageCountersFromSummary(summary) {{
+            if (!summary) return;
+            const cntActive = document.getElementById('cnt-pipe-active');
+            const cntApplied = document.getElementById('cnt-pipe-applied');
+            const cntScreening = document.getElementById('cnt-pipe-screening');
+            const cntInterview = document.getElementById('cnt-pipe-interview');
+            const cntOffered = document.getElementById('cnt-pipe-offered');
+            const cntRejected = document.getElementById('cnt-pipe-rejected');
+            const cntWithdrawn = document.getElementById('cnt-pipe-withdrawn');
+            const topPipe = document.getElementById('top-pipeline-count');
+            const badgePipe = document.getElementById('badge-pipeline-count');
+
+            const active = (summary.applied || 0) + (summary.screening || 0) + (summary.interview || 0) + (summary.offered || 0);
+            if (cntActive) cntActive.innerText = summary.all_active || active;
+            if (cntApplied) cntApplied.innerText = summary.applied || 0;
+            if (cntScreening) cntScreening.innerText = summary.screening || 0;
+            if (cntInterview) cntInterview.innerText = summary.interview || 0;
+            if (cntOffered) cntOffered.innerText = summary.offered || 0;
+            if (cntRejected) cntRejected.innerText = summary.rejected || 0;
+            if (cntWithdrawn) cntWithdrawn.innerText = summary.withdrawn || 0;
+            if (topPipe) topPipe.innerText = summary.all_active || active;
+            if (badgePipe) badgePipe.innerText = summary.total_pipeline || ALL_PIPELINE_JOBS.length;
+        }}
+
+        // ========================================================
+        // APPLICATION DETAILS & NOTES MODAL (Point 10)
+        // ========================================================
+        function openDetailsModal(jobId) {{
+            const job = ALL_PIPELINE_JOBS.find(j => j.id === jobId);
+            if (!job) return;
+            currentModalJobId = jobId;
+
+            document.getElementById('modal-title').innerText = `${{job.title}} — #${{job.id}}`;
+            document.getElementById('modal-sub').innerText = `${{job.company}} • 📍 ${{job.location}} • Track: ${{job.track}} • Match: ${{parseFloat(job.score).toFixed(1)}}% • Stage: ${{job.stage.toUpperCase()}}`;
+            document.getElementById('modal-notes-url').value = job.url || '#';
+            document.getElementById('modal-letter-text').value = job.letter || 'No cover letter draft recorded.';
+
+            // Parse notes
+            let notesObj = {{}};
+            try {{
+                notesObj = JSON.parse(job.notes);
+            }} catch (e) {{
+                notesObj = {{ text: job.notes || '' }};
+            }}
+
+            document.getElementById('modal-notes-recruiter').value = notesObj.recruiter || '';
+            document.getElementById('modal-notes-salary').value = notesObj.salary || '';
+            document.getElementById('modal-notes-followup').value = notesObj.followup || '';
+            document.getElementById('modal-notes-text').value = notesObj.text || '';
+
+            // Build Timeline
+            const appliedDate = job.applied_date ? job.applied_date.replace(/T.*/, '') : 'Recent';
+            const stages = ['applied', 'screening', 'interview', 'offered'];
+            const currentStage = job.stage;
+            const isExit = ['rejected', 'withdrawn'].includes(currentStage);
+
+            let timelineHtml = '';
+            stages.forEach((st, idx) => {{
+                let cls = '';
+                const stIdx = stages.indexOf(currentStage);
+                if (st === currentStage) cls = 'active';
+                else if (!isExit && stIdx > idx) cls = 'passed';
+
+                let dateSub = '';
+                if (st === 'applied') dateSub = appliedDate;
+
+                timelineHtml += `
+                <div class="timeline-step ${{cls}}">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-label">${{st}}</div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${{dateSub}}</div>
+                </div>
+                `;
+            }});
+
+            if (isExit) {{
+                timelineHtml += `
+                <div class="timeline-step active">
+                    <div class="timeline-dot" style="background:var(--accent-coral);"></div>
+                    <div class="timeline-label" style="color:var(--accent-coral);">${{currentStage}}</div>
+                </div>
+                `;
+            }}
+
+            document.getElementById('modal-timeline').innerHTML = timelineHtml;
+            document.getElementById('app-modal').classList.add('open');
+        }}
+
+        function closeModal() {{
+            document.getElementById('app-modal').classList.remove('open');
+            currentModalJobId = null;
+        }}
+
+        function closeModalOnOverlay(e) {{
+            if (e.target.id === 'app-modal') {{
+                closeModal();
+            }}
+        }}
+
+        function copyModalLetter() {{
+            const textarea = document.getElementById('modal-letter-text');
+            if (textarea) {{
+                textarea.select();
+                navigator.clipboard.writeText(textarea.value);
+                showToast('✓ Cover letter copied to clipboard!');
+            }}
+        }}
+
+        async function saveModalNotes() {{
+            if (!currentModalJobId) return;
+            const btn = document.getElementById('modal-btn-save');
+            btn.disabled = true;
+            btn.innerText = 'Saving...';
+
+            const notesPayload = {{
+                recruiter: document.getElementById('modal-notes-recruiter').value.trim(),
+                salary: document.getElementById('modal-notes-salary').value.trim(),
+                followup: document.getElementById('modal-notes-followup').value,
+                text: document.getElementById('modal-notes-text').value.trim(),
+            }};
+            const notesStr = JSON.stringify(notesPayload);
+
+            // Update in local array
+            const job = ALL_PIPELINE_JOBS.find(j => j.id === currentModalJobId);
+            if (job) job.notes = notesStr;
+
+            try {{
+                const res = await fetch(`/api/applications/${{currentModalJobId}}/status`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ notes: notesStr }})
+                }});
+
+                if (res.ok) {{
+                    showToast(`✓ Application notes for Job #${{currentModalJobId}} saved successfully!`);
+                }} else {{
+                    throw new Error('API server unavailable');
+                }}
+            }} catch (err) {{
+                localStorage.setItem(`app_notes_${{currentModalJobId}}`, notesStr);
+                showToast(`✓ Application notes saved locally for Job #${{currentModalJobId}}!`);
+            }} finally {{
+                btn.disabled = false;
+                btn.innerText = '💾 Save Notes';
+                closeModal();
+            }}
+        }}
+
+        // ========================================================
+        // TAB 3: COMPLETE JOB DATABASE ARCHIVE
+        // ========================================================
+        function filterDatabaseTable() {{
+            const search = (document.getElementById('db-search').value || '').toLowerCase().trim();
+            const status = document.getElementById('db-filter-status').value.toLowerCase();
+            const company = document.getElementById('db-filter-company').value.toLowerCase();
+            const track = document.getElementById('db-filter-track').value.toLowerCase();
+            const priority = document.getElementById('db-filter-priority').value.toLowerCase();
+            const source = document.getElementById('db-filter-source').value.toLowerCase();
+
+            filteredDbJobs = ALL_DB_JOBS.filter(j => {{
+                if (search) {{
+                    const fullText = (j.company + ' ' + j.title + ' ' + j.location + ' ' + j.track).toLowerCase();
+                    if (!fullText.includes(search)) return false;
+                }}
+                if (status !== 'all') {{
+                    if (status === 'prepared' && j.status !== 'prepared') return false;
+                    else if (status !== 'prepared' && j.status.toLowerCase() !== status) return false;
+                }}
+                if (company !== 'all' && j.company.toLowerCase() !== company) return false;
+                if (track !== 'all' && (j.track || '').toLowerCase() !== track) return false;
+                if (priority !== 'all' && (j.priority || '').toLowerCase() !== priority) return false;
+                if (source !== 'all' && (j.source || '').toLowerCase() !== source) return false;
+                return true;
+            }});
+
+            dbCurrentPage = 1;
+            renderDatabaseTable();
+        }}
+
+        function renderDatabaseTable() {{
+            const tbody = document.getElementById('db-table-body');
+            const info = document.getElementById('db-pagination-info');
+            const controls = document.getElementById('db-pagination-controls');
+            if (!tbody) return;
+
+            const total = filteredDbJobs.length;
+            const totalPages = Math.max(1, Math.ceil(total / dbPageSize));
+            const startIdx = (dbCurrentPage - 1) * dbPageSize;
+            const endIdx = Math.min(startIdx + dbPageSize, total);
+            const pageItems = filteredDbJobs.slice(startIdx, endIdx);
+
+            info.innerText = `Showing ${{total === 0 ? 0 : startIdx + 1}}–${{endIdx}} of ${{total}} jobs`;
+
+            let rowsHtml = '';
+            for (const j of pageItems) {{
+                const prioClass = j.priority === 'high' ? 'priority-high' : (j.priority === 'medium' ? 'priority-medium' : '');
+                const prioLabel = (j.priority || 'none').toUpperCase();
+                rowsHtml += `
+                <tr>
+                    <td><strong>#${{j.id}}</strong></td>
+                    <td><strong>${{escapeHtml(j.company)}}</strong></td>
+                    <td><a href="${{escapeHtml(j.url)}}" target="_blank" rel="noopener noreferrer" style="color:var(--text-primary); text-decoration:none; font-weight:600;">${{escapeHtml(j.title)}}</a></td>
+                    <td><span style="color:var(--text-secondary);">${{escapeHtml(j.location)}}</span></td>
+                    <td><span class="track-tag" style="font-size:11px;">${{escapeHtml(j.track)}}</span></td>
+                    <td><span class="score-pill">${{parseFloat(j.score).toFixed(1)}}%</span></td>
+                    <td>${{ prioClass ? `<span class="badge ${{prioClass}}" style="font-size:10px;">${{prioLabel}}</span>` : `<span style="color:var(--text-muted); font-size:11px;">NONE</span>` }}</td>
+                    <td><span class="stage-pill stage-${{j.status}}" style="font-size:10px;">${{j.status.toUpperCase()}}</span></td>
+                    <td><span style="font-size:11px;">${{j.freshness}}</span></td>
+                    <td><a href="${{escapeHtml(j.url)}}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary-sm">Apply ↗</a></td>
+                </tr>
+                `;
+            }}
+            tbody.innerHTML = rowsHtml || '<tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text-secondary);">No historical records match your filter criteria.</td></tr>';
+
+            // Pagination Controls
+            let pBtns = '';
+            pBtns += `<button class="page-btn" onclick="changeDbPage(${{dbCurrentPage - 1}})" ${{dbCurrentPage <= 1 ? 'disabled' : ''}}>« Prev</button>`;
+
+            const maxVisible = 5;
+            let startP = Math.max(1, dbCurrentPage - 2);
+            let endP = Math.min(totalPages, startP + maxVisible - 1);
+            if (endP - startP < maxVisible - 1) {{
+                startP = Math.max(1, endP - maxVisible + 1);
+            }}
+
+            for (let p = startP; p <= endP; p++) {{
+                pBtns += `<button class="page-btn ${{p === dbCurrentPage ? 'active' : ''}}" onclick="changeDbPage(${{p}})">${{p}}</button>`;
+            }}
+
+            pBtns += `<button class="page-btn" onclick="changeDbPage(${{dbCurrentPage + 1}})" ${{dbCurrentPage >= totalPages ? 'disabled' : ''}}>Next »</button>`;
+            controls.innerHTML = pBtns;
+        }}
+
+        function changeDbPage(newPage) {{
+            const totalPages = Math.max(1, Math.ceil(filteredDbJobs.length / dbPageSize));
+            if (newPage < 1 || newPage > totalPages) return;
+            dbCurrentPage = newPage;
+            renderDatabaseTable();
+        }}
+
+        function changeDbPageSize(newSize) {{
+            dbPageSize = parseInt(newSize, 10) || 25;
+            dbCurrentPage = 1;
+            renderDatabaseTable();
+        }}
+
+        // General Utilities
         function filterActionJobs(filter, btn) {{
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             if (btn) btn.classList.add('active');
@@ -1862,20 +2764,10 @@ def generate_html_report(
             }});
         }}
 
-        // Filter Pipeline Stage
-        function filterPipelineStage(stage, el) {{
-            document.querySelectorAll('.pipe-metric-box').forEach(b => b.classList.remove('active'));
-            if (el) el.classList.add('active');
-
-            const cards = document.querySelectorAll('#pipeline-cards-container .pipeline-card');
-            cards.forEach(card => {{
-                const s = card.getAttribute('data-stage');
-                if (stage === 'all') {{
-                    card.style.display = 'block';
-                }} else {{
-                    card.style.display = (s === stage) ? 'block' : 'none';
-                }}
-            }});
+        function escapeHtml(text) {{
+            if (!text) return '';
+            const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }};
+            return text.toString().replace(/[&<>"']/g, m => map[m]);
         }}
 
         function showToast(msg) {{
@@ -1885,8 +2777,10 @@ def generate_html_report(
             setTimeout(() => toast.classList.remove('show'), 3500);
         }}
 
-        // Restore offline states if viewing without server
+        // Initial setup on DOM ready
         window.addEventListener('DOMContentLoaded', () => {{
+            renderPipelineTable();
+            renderDatabaseTable();
             document.querySelectorAll('#action-jobs-container .job-card').forEach(card => {{
                 const jid = card.id.replace('card-', '');
                 if (localStorage.getItem(`app_status_${{jid}}`) === 'applied') {{
@@ -1909,6 +2803,7 @@ def generate_daily_reports(db_path: Path = DB_PATH, reports_dir: Path = REPORTS_
     stats = get_pipeline_statistics(conn)
     action_jobs = get_actionable_jobs(conn)
     pipeline_jobs = get_pipeline_jobs(conn)
+    all_db_jobs = get_all_database_jobs(conn)
     conn.close()
 
     app_repo = ApplicationRepository(str(db_path))
@@ -1923,7 +2818,7 @@ def generate_daily_reports(db_path: Path = DB_PATH, reports_dir: Path = REPORTS_
     md_file = reports_dir / f"daily_digest_{today_str}.md"
     md_file.write_text(md_content, encoding="utf-8")
 
-    html_content = generate_html_report(today_str, stats, action_jobs, pipeline_jobs, pipeline_summary, market_report)
+    html_content = generate_html_report(today_str, stats, action_jobs, pipeline_jobs, all_db_jobs, pipeline_summary, market_report)
     html_file = reports_dir / f"daily_digest_{today_str}.html"
     html_file.write_text(html_content, encoding="utf-8")
 
@@ -1936,6 +2831,7 @@ def generate_daily_reports(db_path: Path = DB_PATH, reports_dir: Path = REPORTS_
         "latest_html": latest_html,
         "action_jobs_count": len(action_jobs),
         "pipeline_jobs_count": len(pipeline_jobs),
+        "all_db_jobs_count": len(all_db_jobs),
     }
 
 
@@ -1945,6 +2841,7 @@ if __name__ == "__main__":
     print("DAILY DIGEST & PIPELINE GENERATED SUCCESSFULLY")
     print(f"Action Queue (Prepared): {result['action_jobs_count']}")
     print(f"Pipeline Active:         {result['pipeline_jobs_count']}")
+    print(f"Database Total:          {result['all_db_jobs_count']}")
     print(f"Markdown Report:         {result['md_path']}")
     print(f"HTML Report:             {result['html_path']}")
     print(f"Latest Link:             {result['latest_html']}")

@@ -114,6 +114,19 @@ class ApplicationRepository:
         self.connection.commit()
         return cursor.rowcount > 0
 
+    def update_notes(self, job_id: int, notes: str) -> bool:
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            UPDATE applications
+            SET notes = ?
+            WHERE job_id = ?
+            """,
+            (notes, job_id),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
     def get_by_job_id(self, job_id: int) -> Optional[Dict[str, Any]]:
         cursor = self.connection.cursor()
         cursor.execute(
@@ -205,8 +218,10 @@ class ApplicationRepository:
         withdrawn = counts.get("withdrawn", 0)
         prepared = counts.get("prepared", 0)
 
-        total_pipeline = applied + screening + interview + offered + rejected + withdrawn
+        all_active = applied + screening + interview + offered
+        total_pipeline = all_active + rejected + withdrawn
         return {
+            "all_active": all_active,
             "applied": applied,
             "screening": screening,
             "interview": interview,
