@@ -2,7 +2,7 @@
 """
 Daily Digest and Interactive Report Generator.
 Generates:
-1. reports/daily_digest_YYYY-MM-DD.html (Rich 4-tab interactive dashboard: Action Queue, Pipeline Tracker, Historical Database, Market Intelligence)
+1. reports/daily_digest_YYYY-MM-DD.html (Curated 3-tab interactive dashboard: Action Queue, Application Pipeline Tracker, Market Intelligence)
 2. reports/daily_digest_YYYY-MM-DD.md (Clean markdown digest report)
 3. reports/latest_report.html (Symlink/copy for convenient local opening)
 """
@@ -10,12 +10,11 @@ Generates:
 import datetime
 import html
 import json
-import math
 import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -159,7 +158,7 @@ def get_actionable_jobs(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 
 def get_pipeline_jobs(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """
-    Returns jobs active in the application tracker (applied, screening, interview, offered, rejected, withdrawn).
+    Returns ONLY jobs active in the application tracker (applied, screening, interview, offered, rejected, withdrawn).
     """
     app_repo = ApplicationRepository()
     rows = app_repo.get_pipeline_jobs()
@@ -182,20 +181,6 @@ def get_pipeline_jobs(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     return rows
 
 
-def get_all_database_jobs(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
-    """
-    Returns full database inventory for Tab 3.
-    """
-    app_repo = ApplicationRepository()
-    result = app_repo.get_database_jobs(limit=1000)
-    app_repo.close()
-
-    for r in result["items"]:
-        r["freshness"] = format_freshness(r.get("posted_at"), r.get("collected_at"))
-
-    return result["items"]
-
-
 def generate_markdown_report(
     date_str: str,
     stats: Dict[str, Any],
@@ -213,9 +198,8 @@ def generate_markdown_report(
                  f"{pipeline_summary.get('interview', 0)} Interview | "
                  f"{pipeline_summary.get('offered', 0)} Offers | "
                  f"{pipeline_summary.get('rejected', 0)} Rejected")
-    lines.append(f"- **Market Monitored**: {stats['total_jobs']} European engineering opportunities evaluated\n")
 
-    lines.append("## 2. Action Queue — Top Applications Ready to Submit\n")
+    lines.append("\n## 2. Action Queue — Top Applications Ready to Submit\n")
     lines.append("| ID | Company | Role & Location | Freshness | Priority | Match | CV Variant | Action |")
     lines.append("|:---:|:---|:---|:---:|:---:|:---:|:---|:---|")
 
@@ -263,13 +247,14 @@ def generate_html_report(
     stats: Dict[str, Any],
     action_jobs: List[Dict[str, Any]],
     pipeline_jobs: List[Dict[str, Any]],
-    all_db_jobs: List[Dict[str, Any]],
     pipeline_summary: Dict[str, int],
     market: Dict[str, Any],
+    all_db_jobs: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     high_count = sum(1 for j in action_jobs if j["priority"] == "high")
     med_count = sum(1 for j in action_jobs if j["priority"] == "medium")
     action_count = len(action_jobs)
+    applied_count = len(pipeline_jobs)
 
     # 1. Generate Action Queue Cards HTML (Tab 1)
     action_cards_html = []
@@ -359,11 +344,11 @@ def generate_html_report(
         """
         action_cards_html.append(card_html)
 
-    # 2. Generate Pipeline Cards HTML (Tab 2)
+    # 2. Generate Pipeline Cards HTML (Tab 2) - ONLY APPLIED JOBS!
     pipeline_cards_html = []
     for pj in pipeline_jobs:
         jid = pj["id"]
-        stage = pj["app_status"]
+        stage = normalize_status(pj.get("app_status") or "applied")
         applied_date_str = pj.get("applied_date") or "Recently"
         url = pj.get("url") or "#"
         score = pj.get("final_score") or pj.get("match_score") or 0
@@ -406,8 +391,8 @@ def generate_html_report(
                 </div>
 
                 <div class="pipe-btn-group">
-                    <a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary-sm">Site ↗</a>
-                    <button class="btn btn-secondary-sm" onclick="toggleAccordion('pipe-letter-{jid}')">Cover Letter</button>
+                    <a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary-sm">Job Site ↗</a>
+                    <button class="btn btn-secondary-sm" onclick="toggleAccordion('pipe-letter-{jid}')">View Letter</button>
                     { '<button class="btn btn-primary-sm" onclick="advanceStage(' + str(jid) + ', \'screening\')">➔ Move to Screening</button>' if stage == 'applied' else '' }
                     { '<button class="btn btn-primary-sm" onclick="advanceStage(' + str(jid) + ', \'interview\')">➔ Move to Interview</button>' if stage == 'screening' else '' }
                     { '<button class="btn btn-success-sm" onclick="advanceStage(' + str(jid) + ', \'offered\')">🎉 Offer Received</button>' if stage in ('interview', 'interviewing') else '' }
@@ -421,7 +406,7 @@ def generate_html_report(
         """
         pipeline_cards_html.append(pipeline_card)
 
-    # 3. Market Moving: Domain Momentum HTML (Tab 4)
+    # 3. Market Moving: Domain Momentum HTML (Tab 3)
     domain_momentum_rows = []
     for dm in market.get("domain_momentum", []):
         domain_momentum_rows.append(f"""
@@ -437,7 +422,7 @@ def generate_html_report(
         </div>
         """)
 
-    # 4. Your Skill Position Table HTML (Tab 4)
+    # 4. Your Skill Position Table HTML (Tab 3)
     skill_position_rows = []
     for sp in market.get("candidate_skill_position", []):
         skill_position_rows.append(f"""
@@ -469,7 +454,7 @@ def generate_html_report(
         </tr>
         """)
 
-    # 5. High ROI Skills Cards HTML (Tab 4)
+    # 5. High ROI Skills Cards HTML (Tab 3)
     high_roi_cards = []
     for idx, g in enumerate(market.get("high_roi_skills_to_learn", []), start=1):
         companies_str = ", ".join(html.escape(c) for c in g["companies"])
@@ -489,35 +474,6 @@ def generate_html_report(
             </div>
         </div>
         """)
-
-    # JSON database serialization for client-side search & pagination in Tab 3
-    db_jobs_json = json.dumps(
-        [
-            {
-                "id": j["id"],
-                "company": j["company"],
-                "title": j["title"],
-                "location": j.get("location") or "Europe",
-                "source": j.get("source", "greenhouse"),
-                "track": j.get("primary_track", "general"),
-                "priority": j.get("priority", "none"),
-                "score": j.get("match_score", 0),
-                "status": j.get("app_status", "discovered"),
-                "freshness": j["freshness"]["badge"],
-                "url": j.get("url") or "#",
-            }
-            for j in all_db_jobs
-        ]
-    )
-
-    # Distinct filters for dropdowns
-    companies = sorted(list(set(j["company"] for j in all_db_jobs if j.get("company"))))
-    tracks = sorted(list(set(j.get("primary_track", "general") for j in all_db_jobs if j.get("primary_track"))))
-    sources = sorted(list(set(j.get("source", "greenhouse") for j in all_db_jobs if j.get("source"))))
-
-    company_options_html = "".join(f'<option value="{html.escape(c)}">{html.escape(c)}</option>' for c in companies)
-    track_options_html = "".join(f'<option value="{html.escape(t)}">{html.escape(t)}</option>' for t in tracks)
-    source_options_html = "".join(f'<option value="{html.escape(s)}">{html.escape(s)}</option>' for s in sources)
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -631,8 +587,8 @@ def generate_html_report(
             background: var(--accent-primary);
         }}
         .stat-card.card-green::before {{ background: var(--accent-green); }}
-        .stat-card.card-amber::before {{ background: var(--accent-amber); }}
         .stat-card.card-purple::before {{ background: var(--accent-purple); }}
+        .stat-card.card-amber::before {{ background: var(--accent-amber); }}
 
         .stat-label {{
             color: var(--text-secondary);
@@ -1281,116 +1237,7 @@ def generate_html_report(
             flex-wrap: wrap;
         }}
 
-        /* Database (Tab 3) Styles */
-        .db-controls-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 12px;
-            background: var(--surface-color);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 20px;
-        }}
-        .db-control-group label {{
-            display: block;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            color: var(--text-secondary);
-            margin-bottom: 4px;
-        }}
-        .db-select, .db-input {{
-            width: 100%;
-            background: var(--bg-color);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 7px 10px;
-            color: var(--text-primary);
-            font-size: 13px;
-        }}
-        .db-select:focus, .db-input:focus {{
-            outline: none;
-            border-color: var(--accent-primary);
-        }}
-
-        .db-table-wrap {{
-            background: var(--surface-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            overflow-x: auto;
-            margin-bottom: 16px;
-        }}
-        .db-table {{
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-            text-align: left;
-        }}
-        .db-table th {{
-            background: var(--surface-color);
-            color: var(--text-secondary);
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 12px 14px;
-            border-bottom: 1px solid var(--border-color);
-        }}
-        .db-table td {{
-            padding: 12px 14px;
-            border-bottom: 1px solid var(--border-color);
-            vertical-align: middle;
-        }}
-        .db-table tr:hover td {{
-            background: var(--surface-hover);
-        }}
-
-        /* Pagination Bar */
-        .pagination-bar {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 16px;
-            background: var(--surface-color);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            font-size: 13px;
-            flex-wrap: wrap;
-            gap: 12px;
-        }}
-        .pagination-info {{
-            color: var(--text-secondary);
-        }}
-        .pagination-btns {{
-            display: flex;
-            gap: 6px;
-            align-items: center;
-        }}
-        .page-btn {{
-            background: var(--bg-color);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-        }}
-        .page-btn:hover {{
-            background: var(--surface-hover);
-        }}
-        .page-btn.active {{
-            background: var(--accent-primary);
-            color: #ffffff;
-            border-color: var(--accent-primary);
-        }}
-        .page-btn:disabled {{
-            opacity: 0.4;
-            cursor: not-allowed;
-        }}
-
-        /* Market Intelligence (Tab 4) Styles */
+        /* Market Intelligence (Tab 3) Styles */
         .market-split-grid {{
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -1647,13 +1494,13 @@ def generate_html_report(
             </div>
             <div class="stat-card card-green">
                 <span class="stat-label">Active Applications</span>
-                <span class="stat-value" id="top-pipeline-count">{pipeline_summary.get('applied', 0) + pipeline_summary.get('screening', 0) + pipeline_summary.get('interview', 0)}</span>
+                <span class="stat-value" id="top-pipeline-count">{applied_count}</span>
                 <span class="stat-sub">{pipeline_summary.get('applied', 0)} Applied • {pipeline_summary.get('screening', 0)} Screening • {pipeline_summary.get('interview', 0)} Interview</span>
             </div>
             <div class="stat-card card-purple">
-                <span class="stat-label">Historical Archive</span>
-                <span class="stat-value">{stats['total_jobs']}</span>
-                <span class="stat-sub">{stats['stage1_passed']} Qualified European Roles</span>
+                <span class="stat-label">Pipeline In Progress</span>
+                <span class="stat-value">{pipeline_summary.get('screening', 0) + pipeline_summary.get('interview', 0) + pipeline_summary.get('offered', 0)}</span>
+                <span class="stat-sub">{pipeline_summary.get('interview', 0)} Interviews • {pipeline_summary.get('offered', 0)} Offers</span>
             </div>
             <div class="stat-card card-amber">
                 <span class="stat-label">Target Markets</span>
@@ -1662,7 +1509,7 @@ def generate_html_report(
             </div>
         </div>
 
-        <!-- 4-Tab Navigation -->
+        <!-- 3-Tab Navigation -->
         <div class="nav-tabs">
             <button class="nav-tab-btn active" id="tab-btn-applications" onclick="switchNavTab('applications')">
                 📋 Applications (Action Queue)
@@ -1670,11 +1517,7 @@ def generate_html_report(
             </button>
             <button class="nav-tab-btn" id="tab-btn-pipeline" onclick="switchNavTab('pipeline')">
                 🚀 Application Pipeline (Tracker)
-                <span class="tab-count-badge" id="badge-pipeline-count">{len(pipeline_jobs)}</span>
-            </button>
-            <button class="nav-tab-btn" id="tab-btn-database" onclick="switchNavTab('database')">
-                🗄️ Database Archive
-                <span class="tab-count-badge">{len(all_db_jobs)}</span>
+                <span class="tab-count-badge" id="badge-pipeline-count">{applied_count}</span>
             </button>
             <button class="nav-tab-btn" id="tab-btn-market" onclick="switchNavTab('market')">
                 📈 Market Intelligence
@@ -1690,7 +1533,7 @@ def generate_html_report(
                 <div>
                     <div class="section-intro-title">Action Queue: Prepared Applications Ready to Submit</div>
                     <div class="section-intro-sub">
-                        Contains only jobs requiring your action. Clicking <strong>[✓ Mark as Applied]</strong> transitions the job into your active Application Pipeline.
+                        Contains only top vetted jobs requiring your action. Clicking <strong>[✓ Mark as Applied]</strong> moves the job directly into your active Application Pipeline.
                     </div>
                 </div>
                 <div class="action-counter-pill" id="action-queue-summary-pill">
@@ -1712,19 +1555,19 @@ def generate_html_report(
             </div>
 
             <div class="jobs-list" id="action-jobs-container">
-                {"".join(action_cards_html) if action_cards_html else '<div class="empty-state">No jobs in action queue. Check historical database or run collection.</div>'}
+                {"".join(action_cards_html) if action_cards_html else '<div class="empty-state" style="text-align:center; padding:40px; color:var(--text-secondary);">No jobs remaining in action queue. Great job applying!</div>'}
             </div>
         </div>
 
         <!-- ======================================================== -->
-        <!-- TAB 2: APPLICATION PIPELINE (TRACKER)                    -->
+        <!-- TAB 2: APPLICATION PIPELINE (TRACKER - ONLY APPLIED)     -->
         <!-- ======================================================== -->
         <div id="tab-pipeline" class="tab-content" style="display: none;">
             <div class="section-intro-bar">
                 <div>
                     <div class="section-intro-title">Application Pipeline Tracker</div>
                     <div class="section-intro-sub">
-                        Track live candidate progression from initial submission to screening, interview, and offer.
+                        Tracks only jobs you have actually applied to. Progress each application through Screening, Interview, and Offer stages.
                     </div>
                 </div>
             </div>
@@ -1732,11 +1575,11 @@ def generate_html_report(
             <!-- Pipeline Metric Boxes -->
             <div class="pipeline-metrics-row">
                 <div class="pipe-metric-box active" onclick="filterPipelineStage('all', this)">
-                    <div class="pipe-metric-title">ALL ACTIVE</div>
-                    <div class="pipe-metric-val" id="metric-pipe-all">{len(pipeline_jobs)}</div>
+                    <div class="pipe-metric-title">ALL APPLIED</div>
+                    <div class="pipe-metric-val" id="metric-pipe-all">{applied_count}</div>
                 </div>
                 <div class="pipe-metric-box" onclick="filterPipelineStage('applied', this)">
-                    <div class="pipe-metric-title">APPLIED</div>
+                    <div class="pipe-metric-title">SUBMITTED</div>
                     <div class="pipe-metric-val" id="metric-pipe-applied">{pipeline_summary.get('applied', 0)}</div>
                 </div>
                 <div class="pipe-metric-box" onclick="filterPipelineStage('screening', this)">
@@ -1757,111 +1600,14 @@ def generate_html_report(
                 </div>
             </div>
 
-            <!-- Pipeline Cards Container -->
+            <!-- Pipeline Cards Container (ONLY APPLIED JOBS) -->
             <div id="pipeline-cards-container">
                 {"".join(pipeline_cards_html) if pipeline_cards_html else '<div class="empty-state" style="text-align:center; padding:40px; color:var(--text-secondary);">No applications in tracker yet. Click [✓ Mark as Applied] on any job in the Applications tab to track it here.</div>'}
             </div>
         </div>
 
         <!-- ======================================================== -->
-        <!-- TAB 3: COMPLETE HISTORICAL DATABASE                      -->
-        <!-- ======================================================== -->
-        <div id="tab-database" class="tab-content" style="display: none;">
-            <div class="section-intro-bar">
-                <div>
-                    <div class="section-intro-title">Complete Historical Database ({len(all_db_jobs)} Jobs)</div>
-                    <div class="section-intro-sub">
-                        Archive of every ingested and evaluated opportunity across European sources. Cleanly paginated for high-volume growth.
-                    </div>
-                </div>
-            </div>
-
-            <!-- Filters Grid -->
-            <div class="db-controls-grid">
-                <div class="db-control-group">
-                    <label>Search Keyword</label>
-                    <input type="text" class="db-input" id="db-search" placeholder="Company, title, skill..." oninput="filterDatabase()">
-                </div>
-                <div class="db-control-group">
-                    <label>Status</label>
-                    <select class="db-select" id="db-filter-status" onchange="filterDatabase()">
-                        <option value="all">All Statuses</option>
-                        <option value="prepared">Prepared (Action Queue)</option>
-                        <option value="applied">Applied</option>
-                        <option value="screening">Screening</option>
-                        <option value="interview">Interview</option>
-                        <option value="offered">Offered</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="discovered">Discovered</option>
-                    </select>
-                </div>
-                <div class="db-control-group">
-                    <label>Company</label>
-                    <select class="db-select" id="db-filter-company" onchange="filterDatabase()">
-                        <option value="all">All Companies</option>
-                        {company_options_html}
-                    </select>
-                </div>
-                <div class="db-control-group">
-                    <label>Career Track</label>
-                    <select class="db-select" id="db-filter-track" onchange="filterDatabase()">
-                        <option value="all">All Tracks</option>
-                        {track_options_html}
-                    </select>
-                </div>
-                <div class="db-control-group">
-                    <label>Priority</label>
-                    <select class="db-select" id="db-filter-priority" onchange="filterDatabase()">
-                        <option value="all">All Priorities</option>
-                        <option value="high">High</option>
-                        <option value="medium">Medium</option>
-                        <option value="low">Low</option>
-                        <option value="none">None</option>
-                    </select>
-                </div>
-                <div class="db-control-group">
-                    <label>Source</label>
-                    <select class="db-select" id="db-filter-source" onchange="filterDatabase()">
-                        <option value="all">All Sources</option>
-                        {source_options_html}
-                    </select>
-                </div>
-            </div>
-
-            <!-- Database Table -->
-            <div class="db-table-wrap">
-                <table class="db-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 50px;">ID</th>
-                            <th>Company</th>
-                            <th>Job Title</th>
-                            <th>Location</th>
-                            <th>Track</th>
-                            <th>Score</th>
-                            <th>Priority</th>
-                            <th>Status</th>
-                            <th>Freshness</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="db-table-body">
-                        <!-- Populated by JavaScript -->
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Pagination Bar -->
-            <div class="pagination-bar">
-                <div class="pagination-info" id="db-pagination-info">Showing 1–25 of {len(all_db_jobs)}</div>
-                <div class="pagination-btns" id="db-pagination-controls">
-                    <!-- Populated by JavaScript -->
-                </div>
-            </div>
-        </div>
-
-        <!-- ======================================================== -->
-        <!-- TAB 4: REDESIGNED MARKET INTELLIGENCE                    -->
+        <!-- TAB 3: REDESIGNED MARKET INTELLIGENCE                    -->
         <!-- ======================================================== -->
         <div id="tab-market" class="tab-content" style="display: none;">
             <div class="market-split-grid">
@@ -1869,7 +1615,7 @@ def generate_html_report(
                 <div class="market-box">
                     <h3>🚀 Where Your Target Market Is Moving</h3>
                     <p class="market-box-sub">
-                        Domain momentum tracking across {stats['total_jobs']} European engineering job postings.
+                        Domain momentum tracking across European engineering job postings.
                     </p>
                     <div class="momentum-list">
                         {"".join(domain_momentum_rows)}
@@ -1919,23 +1665,15 @@ def generate_html_report(
 
     <!-- Client-Side State & Logic -->
     <script>
-        // Ingest embedded database for fast, offline-capable search and pagination
-        const ALL_DB_JOBS = {db_jobs_json};
-        let filteredDbJobs = [...ALL_DB_JOBS];
-        let dbCurrentPage = 1;
-        const dbPageSize = 25;
-
         // Navigation Tabs
         function switchNavTab(tabName) {{
             document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
 
-            document.getElementById('tab-btn-' + tabName).classList.add('active');
-            document.getElementById('tab-' + tabName).style.display = 'block';
-
-            if (tabName === 'database') {{
-                renderDatabaseTable();
-            }}
+            const btn = document.getElementById('tab-btn-' + tabName);
+            const content = document.getElementById('tab-' + tabName);
+            if (btn) btn.classList.add('active');
+            if (content) content.style.display = 'block';
         }}
 
         // Accordion Toggle
@@ -1995,7 +1733,7 @@ def generate_html_report(
 
                 if (res.ok) {{
                     const data = await res.json();
-                    showToast(`✓ Job #${{jobId}} (${{company}}) marked as APPLIED and moved to Pipeline!`);
+                    showToast(`✓ Job #${{jobId}} (${{company}}) marked as APPLIED and entered Pipeline!`);
                     updatePipelineCounters(data.summary);
                 }} else {{
                     throw new Error('API server not running');
@@ -2039,16 +1777,20 @@ def generate_html_report(
             if (rejectEl) rejectEl.innerText = summary.rejected || 0;
             if (allEl) allEl.innerText = summary.total_pipeline || 0;
             if (badgeEl) badgeEl.innerText = summary.total_pipeline || 0;
-            if (topEl) topEl.innerText = (summary.applied || 0) + (summary.screening || 0) + (summary.interview || 0);
+            if (topEl) topEl.innerText = summary.total_pipeline || 0;
         }}
 
         function incrementLocalApplied() {{
             const appliedEl = document.getElementById('metric-pipe-applied');
             const allEl = document.getElementById('metric-pipe-all');
             const topEl = document.getElementById('top-pipeline-count');
+            const badgeEl = document.getElementById('badge-pipeline-count');
+
+            const newCount = (parseInt(allEl.innerText, 10) || 0) + 1;
             if (appliedEl) appliedEl.innerText = (parseInt(appliedEl.innerText, 10) || 0) + 1;
-            if (allEl) allEl.innerText = (parseInt(allEl.innerText, 10) || 0) + 1;
-            if (topEl) topEl.innerText = (parseInt(topEl.innerText, 10) || 0) + 1;
+            if (allEl) allEl.innerText = newCount;
+            if (topEl) topEl.innerText = newCount;
+            if (badgeEl) badgeEl.innerText = newCount;
         }}
 
         // Pipeline Stage Transition
@@ -2136,102 +1878,6 @@ def generate_html_report(
             }});
         }}
 
-        // Database Table Filtering & Pagination
-        function filterDatabase() {{
-            const search = (document.getElementById('db-search').value || '').toLowerCase().trim();
-            const status = document.getElementById('db-filter-status').value.toLowerCase();
-            const company = document.getElementById('db-filter-company').value.toLowerCase();
-            const track = document.getElementById('db-filter-track').value.toLowerCase();
-            const priority = document.getElementById('db-filter-priority').value.toLowerCase();
-            const source = document.getElementById('db-filter-source').value.toLowerCase();
-
-            filteredDbJobs = ALL_DB_JOBS.filter(j => {{
-                if (search) {{
-                    const fullText = (j.company + ' ' + j.title + ' ' + j.location + ' ' + j.track).toLowerCase();
-                    if (!fullText.includes(search)) return false;
-                }}
-                if (status !== 'all') {{
-                    if (status === 'prepared' && j.status !== 'prepared') return false;
-                    else if (status !== 'prepared' && j.status.toLowerCase() !== status) return false;
-                }}
-                if (company !== 'all' && j.company.toLowerCase() !== company) return false;
-                if (track !== 'all' && (j.track || '').toLowerCase() !== track) return false;
-                if (priority !== 'all' && (j.priority || '').toLowerCase() !== priority) return false;
-                if (source !== 'all' && (j.source || '').toLowerCase() !== source) return false;
-                return true;
-            }});
-
-            dbCurrentPage = 1;
-            renderDatabaseTable();
-        }}
-
-        function renderDatabaseTable() {{
-            const tbody = document.getElementById('db-table-body');
-            const info = document.getElementById('db-pagination-info');
-            const controls = document.getElementById('db-pagination-controls');
-            if (!tbody) return;
-
-            const total = filteredDbJobs.length;
-            const totalPages = Math.max(1, Math.ceil(total / dbPageSize));
-            const startIdx = (dbCurrentPage - 1) * dbPageSize;
-            const endIdx = Math.min(startIdx + dbPageSize, total);
-            const pageItems = filteredDbJobs.slice(startIdx, endIdx);
-
-            info.innerText = `Showing ${{total === 0 ? 0 : startIdx + 1}}–${{endIdx}} of ${{total}} jobs`;
-
-            let rowsHtml = '';
-            for (const j of pageItems) {{
-                const prioClass = j.priority === 'high' ? 'priority-high' : (j.priority === 'medium' ? 'priority-medium' : '');
-                const prioLabel = (j.priority || 'none').toUpperCase();
-                rowsHtml += `
-                <tr>
-                    <td><strong>#${{j.id}}</strong></td>
-                    <td><strong>${{escapeHtml(j.company)}}</strong></td>
-                    <td><a href="${{escapeHtml(j.url)}}" target="_blank" rel="noopener noreferrer" style="color:var(--text-primary); text-decoration:none; font-weight:600;">${{escapeHtml(j.title)}}</a></td>
-                    <td><span style="color:var(--text-secondary);">${{escapeHtml(j.location)}}</span></td>
-                    <td><span class="track-tag" style="font-size:11px;">${{escapeHtml(j.track)}}</span></td>
-                    <td><span class="score-pill">${{parseFloat(j.score).toFixed(1)}}%</span></td>
-                    <td>${{ prioClass ? `<span class="badge ${{prioClass}}" style="font-size:10px;">${{prioLabel}}</span>` : `<span style="color:var(--text-muted); font-size:11px;">NONE</span>` }}</td>
-                    <td><span class="stage-pill stage-${{j.status}}" style="font-size:10px;">${{j.status.toUpperCase()}}</span></td>
-                    <td><span style="font-size:11px;">${{j.freshness}}</span></td>
-                    <td><a href="${{escapeHtml(j.url)}}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary-sm">Apply ↗</a></td>
-                </tr>
-                `;
-            }}
-            tbody.innerHTML = rowsHtml || '<tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text-secondary);">No historical records match your filter criteria.</td></tr>';
-
-            // Pagination Controls
-            let pBtns = '';
-            pBtns += `<button class="page-btn" onclick="changeDbPage(${{dbCurrentPage - 1}})" ${{dbCurrentPage <= 1 ? 'disabled' : ''}}>« Prev</button>`;
-
-            const maxVisible = 5;
-            let startP = Math.max(1, dbCurrentPage - 2);
-            let endP = Math.min(totalPages, startP + maxVisible - 1);
-            if (endP - startP < maxVisible - 1) {{
-                startP = Math.max(1, endP - maxVisible + 1);
-            }}
-
-            for (let p = startP; p <= endP; p++) {{
-                pBtns += `<button class="page-btn ${{p === dbCurrentPage ? 'active' : ''}}" onclick="changeDbPage(${{p}})">${{p}}</button>`;
-            }}
-
-            pBtns += `<button class="page-btn" onclick="changeDbPage(${{dbCurrentPage + 1}})" ${{dbCurrentPage >= totalPages ? 'disabled' : ''}}>Next »</button>`;
-            controls.innerHTML = pBtns;
-        }}
-
-        function changeDbPage(newPage) {{
-            const totalPages = Math.max(1, Math.ceil(filteredDbJobs.length / dbPageSize));
-            if (newPage < 1 || newPage > totalPages) return;
-            dbCurrentPage = newPage;
-            renderDatabaseTable();
-        }}
-
-        function escapeHtml(text) {{
-            if (!text) return '';
-            const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }};
-            return text.toString().replace(/[&<>"']/g, m => map[m]);
-        }}
-
         function showToast(msg) {{
             const toast = document.getElementById('toast');
             toast.innerText = msg;
@@ -2241,7 +1887,6 @@ def generate_html_report(
 
         // Restore offline states if viewing without server
         window.addEventListener('DOMContentLoaded', () => {{
-            renderDatabaseTable();
             document.querySelectorAll('#action-jobs-container .job-card').forEach(card => {{
                 const jid = card.id.replace('card-', '');
                 if (localStorage.getItem(`app_status_${{jid}}`) === 'applied') {{
@@ -2264,7 +1909,6 @@ def generate_daily_reports(db_path: Path = DB_PATH, reports_dir: Path = REPORTS_
     stats = get_pipeline_statistics(conn)
     action_jobs = get_actionable_jobs(conn)
     pipeline_jobs = get_pipeline_jobs(conn)
-    all_db_jobs = get_all_database_jobs(conn)
     conn.close()
 
     app_repo = ApplicationRepository(str(db_path))
@@ -2279,7 +1923,7 @@ def generate_daily_reports(db_path: Path = DB_PATH, reports_dir: Path = REPORTS_
     md_file = reports_dir / f"daily_digest_{today_str}.md"
     md_file.write_text(md_content, encoding="utf-8")
 
-    html_content = generate_html_report(today_str, stats, action_jobs, pipeline_jobs, all_db_jobs, pipeline_summary, market_report)
+    html_content = generate_html_report(today_str, stats, action_jobs, pipeline_jobs, pipeline_summary, market_report)
     html_file = reports_dir / f"daily_digest_{today_str}.html"
     html_file.write_text(html_content, encoding="utf-8")
 
@@ -2292,7 +1936,6 @@ def generate_daily_reports(db_path: Path = DB_PATH, reports_dir: Path = REPORTS_
         "latest_html": latest_html,
         "action_jobs_count": len(action_jobs),
         "pipeline_jobs_count": len(pipeline_jobs),
-        "all_db_jobs_count": len(all_db_jobs),
     }
 
 
@@ -2302,7 +1945,6 @@ if __name__ == "__main__":
     print("DAILY DIGEST & PIPELINE GENERATED SUCCESSFULLY")
     print(f"Action Queue (Prepared): {result['action_jobs_count']}")
     print(f"Pipeline Active:         {result['pipeline_jobs_count']}")
-    print(f"Database Total:          {result['all_db_jobs_count']}")
     print(f"Markdown Report:         {result['md_path']}")
     print(f"HTML Report:             {result['html_path']}")
     print(f"Latest Link:             {result['latest_html']}")

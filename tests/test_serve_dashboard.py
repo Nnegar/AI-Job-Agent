@@ -71,7 +71,6 @@ class TestServeDashboard(unittest.TestCase):
             self.assertIn("AI Job Agent", content)
             self.assertIn("tab-btn-applications", content)
             self.assertIn("tab-btn-pipeline", content)
-            self.assertIn("tab-btn-database", content)
             self.assertIn("tab-btn-market", content)
 
 
