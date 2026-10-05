@@ -243,3 +243,26 @@ CREATE TABLE IF NOT EXISTS job_market_skills (
 CREATE INDEX IF NOT EXISTS idx_market_skills_name ON job_market_skills(skill_name);
 CREATE INDEX IF NOT EXISTS idx_market_skills_gap ON job_market_skills(is_gap);
 CREATE INDEX IF NOT EXISTS idx_market_skills_category ON job_market_skills(category);
+
+
+
+-- =====================================================
+-- Source Synchronization & Capped Lookback State
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS source_sync_state (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    source TEXT NOT NULL,
+
+    target TEXT NOT NULL,
+
+    last_pull_at TIMESTAMP NOT NULL,
+
+    jobs_collected INTEGER DEFAULT 0,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(source, target)
+);

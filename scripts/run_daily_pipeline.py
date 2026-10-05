@@ -114,6 +114,8 @@ def run_personalization(limit: int = None) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="Run autonomous AI Job Agent daily pipeline.")
+    parser.add_argument("--collect", action="store_true", help="Run multi-source collection before evaluation")
+    parser.add_argument("--lookback", type=int, default=7, help="Max lookback window in days (default: 7)")
     parser.add_argument("--serve", action="store_true", help="Launch interactive dashboard server after completion")
     parser.add_argument("--port", type=int, default=8080, help="Dashboard port (default: 8080)")
     parser.add_argument("--report-only", action="store_true", help="Only refresh reports and market intelligence without running LLM stages")
@@ -122,6 +124,14 @@ def main():
     print("\n========================================================")
     print("   AI JOB AGENT — DAILY AUTONOMOUS PIPELINE EXECUTION   ")
     print("========================================================")
+
+    if args.collect and not args.report_only:
+        print("\n[Step 0/4] Collecting from European Sources & LinkedIn...")
+        from collector.unified_collector import UnifiedCollector
+        collector = UnifiedCollector()
+        stats = collector.collect_from_all_sources(max_lookback_days=args.lookback)
+        collector.close()
+        print(f"       -> Fetched {stats['total_fetched']}, skipped {stats['duplicates_skipped']} dupes, saved {stats['new_jobs_saved']} new unique jobs.")
 
     if not args.report_only:
         # 1. Run Stage 3 Shortlisting
@@ -133,6 +143,7 @@ def main():
         print("\n[Step 2/4] Generating Tailored Cover Letters for Shortlist...")
         new_letters = run_personalization()
         print(f"       -> Generated {new_letters} new cover letter packages.")
+
 
     # 3. Market Intelligence Tracking
     print("\n[Step 3/4] Indexing Market Intelligence & Skill Demand...")

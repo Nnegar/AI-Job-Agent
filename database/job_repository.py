@@ -22,7 +22,8 @@ class JobRepository:
             location = job.get("location", "")
 
         source_job_id = (
-            job.get("external_id")
+            job.get("source_job_id")
+            or job.get("external_id")
             or job.get("id")
         )
 
