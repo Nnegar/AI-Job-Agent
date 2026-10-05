@@ -175,3 +175,39 @@ CREATE TABLE IF NOT EXISTS applications (
 
     UNIQUE(job_id)
 );
+
+
+
+-- =====================================================
+-- Cover Letter Drafts & Personalization
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS cover_letter_drafts (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    job_id INTEGER NOT NULL,
+
+    recommended_cv TEXT NOT NULL,
+
+    letter_text TEXT NOT NULL,
+
+    review_status TEXT NOT NULL
+        DEFAULT 'draft'
+        CHECK (
+            review_status IN (
+                'draft',
+                'needs_revision',
+                'approved'
+            )
+        ),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY(job_id)
+        REFERENCES jobs(id),
+
+    UNIQUE(job_id)
+);
