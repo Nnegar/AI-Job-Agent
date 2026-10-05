@@ -13,14 +13,20 @@ import json
 import mimetypes
 import re
 import socket
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from database.application_repository import ApplicationRepository
 from reports.daily_report_generator import generate_daily_reports
 
-REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports"
+REPORTS_DIR = PROJECT_ROOT / "reports"
+
 
 
 class DashboardHandler(BaseHTTPRequestHandler):

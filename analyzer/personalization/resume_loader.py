@@ -6,8 +6,6 @@ Supports Markdown (.md), Word (.docx), PDF (.pdf), and text (.txt).
 
 from pathlib import Path
 from typing import Dict, List, Optional
-import docx
-import pypdf
 
 RESUMES_DIR = Path(__file__).resolve().parents[2] / "resumes"
 
@@ -15,6 +13,13 @@ _RESUME_CACHE: Dict[str, str] = {}
 
 
 def _extract_from_docx(file_path: Path) -> str:
+    try:
+        import docx
+    except ImportError:
+        raise ImportError(
+            f"python-docx is required to read '{file_path.name}'. "
+            "Please run: pip install python-docx"
+        )
     doc = docx.Document(file_path)
     lines = []
     for p in doc.paragraphs:
@@ -29,6 +34,13 @@ def _extract_from_docx(file_path: Path) -> str:
 
 
 def _extract_from_pdf(file_path: Path) -> str:
+    try:
+        import pypdf
+    except ImportError:
+        raise ImportError(
+            f"pypdf is required to read '{file_path.name}'. "
+            "Please run: pip install pypdf"
+        )
     reader = pypdf.PdfReader(file_path)
     pages_text = []
     for page in reader.pages:
@@ -36,6 +48,7 @@ def _extract_from_pdf(file_path: Path) -> str:
         if text:
             pages_text.append(text.strip())
     return "\n\n".join(pages_text).strip()
+
 
 
 def load_resume(resume_name: str, use_cache: bool = True) -> str:

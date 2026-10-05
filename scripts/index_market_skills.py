@@ -2,7 +2,15 @@
 Script to extract and index market skills across all candidate-analyzed jobs in jobs.db.
 """
 
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from analyzer.market.market_analyzer import MarketAnalyzer
+
 
 def main():
     print("Indexing market skills and candidate gaps across all analyzed jobs...")

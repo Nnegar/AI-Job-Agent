@@ -16,6 +16,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from analyzer.llm.openrouter_client import OpenRouterClient
 from analyzer.personalization.cv_selector import CVSelector
 from analyzer.personalization.resume_loader import load_resume, get_available_resumes
@@ -23,7 +27,8 @@ from analyzer.personalization.story_selector import select_personal_context
 from database.application_repository import ApplicationRepository
 from database.cover_letter_repository import CoverLetterRepository
 
-DB_PATH = Path(__file__).resolve().parents[1] / "database" / "jobs.db"
+DB_PATH = PROJECT_ROOT / "database" / "jobs.db"
+
 
 
 def fetch_shortlisted_jobs(

@@ -9,16 +9,22 @@ import datetime
 import html
 import json
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from analyzer.market.market_analyzer import MarketAnalyzer
 from analyzer.personalization.resume_loader import load_resume
 from database.application_repository import ApplicationRepository
 from database.cover_letter_repository import CoverLetterRepository
 
-DB_PATH = Path(__file__).resolve().parents[1] / "database" / "jobs.db"
-REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports"
+DB_PATH = PROJECT_ROOT / "database" / "jobs.db"
+REPORTS_DIR = PROJECT_ROOT / "reports"
+
 
 
 def get_pipeline_statistics(conn: sqlite3.Connection) -> Dict[str, Any]:
