@@ -31,18 +31,20 @@ from database.stage3_repository import Stage3Repository
 from reports.daily_report_generator import generate_daily_reports
 
 
-def run_stage3_evaluations() -> int:
-    from analyzer.stage3.decision_engine import evaluate_stage2_job
+def run_stage3_evaluations(limit: int = None) -> int:
+    from analyzer.stage3.decision_engine import evaluate_stage3_decision
     repo = Stage3Repository(str(PROJECT_ROOT / "database" / "jobs.db"))
-    unanalyzed = repo.get_stage2_jobs_for_filtering(only_unanalyzed=True)
+    unanalyzed = repo.get_stage2_jobs_for_filtering(only_unanalyzed=True, limit=limit)
     if not unanalyzed:
+        repo.close()
         return 0
 
     count = 0
     for job in unanalyzed:
-        decision = evaluate_stage2_job(job)
-        repo.save_stage3_decision(decision)
+        decision = evaluate_stage3_decision(job)
+        repo.save_decision(decision)
         count += 1
+    repo.close()
     return count
 
 
@@ -117,6 +119,9 @@ def main():
     parser = argparse.ArgumentParser(description="Run autonomous AI Job Agent daily pipeline.")
     parser.add_argument("--collect", action="store_true", help="Run multi-source collection before evaluation")
     parser.add_argument("--lookback", type=int, default=7, help="Max lookback window in days (default: 7)")
+    parser.add_argument("--stage1-limit", type=int, default=None, help="Optional test cap on Stage 1 jobs (default: None, process all)")
+    parser.add_argument("--stage2-limit", type=int, default=None, help="Optional test cap on Stage 2 jobs (default: None, process all)")
+    parser.add_argument("--stage3-limit", type=int, default=None, help="Optional test cap on Stage 3 jobs (default: None, process all)")
     parser.add_argument("--serve", action="store_true", help="Launch interactive dashboard server after completion")
     parser.add_argument("--port", type=int, default=8080, help="Dashboard port (default: 8080)")
     parser.add_argument("--report-only", action="store_true", help="Only refresh reports and market intelligence without running LLM stages")
@@ -137,7 +142,7 @@ def main():
     if not args.report_only:
         # 1. Run Stage 3 Shortlisting
         print("\n[Step 1/4] Checking Stage 3 Shortlist & Decisions...")
-        s3_count = run_stage3_evaluations()
+        s3_count = run_stage3_evaluations(limit=args.stage3_limit)
         print(f"       -> Evaluated {s3_count} new candidate matches.")
 
         # 2. Run Personalization & Cover Letters

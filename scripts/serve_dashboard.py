@@ -76,12 +76,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 
+            s1_param = query_params.get("stage1_limit", [None])[0]
+            s2_param = query_params.get("stage2_limit", [None])[0]
+            s3_param = query_params.get("stage3_limit", [None])[0]
+            max_s1 = int(s1_param) if s1_param and s1_param.isdigit() else None
+            max_s2 = int(s2_param) if s2_param and s2_param.isdigit() else None
+            max_s3 = int(s3_param) if s3_param and s3_param.isdigit() else None
+
             try:
                 runner = PipelineRunner()
                 runner.run_full_pipeline(
-                    max_lookback_days=7,
-                    max_stage1_batch=20,
-                    max_stage2_batch=15,
+                    max_stage1_batch=max_s1,
+                    max_stage2_batch=max_s2,
+                    max_stage3_batch=max_s3,
                     event_callback=emit_sse,
                 )
             except Exception as e:
@@ -89,7 +96,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 emit_sse({
                     "stage": "error",
-                    "percent": 100,
+                    "status": "failed",
                     "callout": f"Pipeline execution error: {str(e)}",
                     "error": str(e),
                 })
@@ -216,12 +223,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         # 3. API: Run Pipeline (Direct JSON response)
         if url_path == "/api/pipeline/run":
             try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                body_data = {}
+                if content_len > 0:
+                    try:
+                        body_data = json.loads(self.rfile.read(content_len).decode("utf-8"))
+                    except Exception:
+                        pass
+                max_s1 = body_data.get("stage1_limit")
+                max_s2 = body_data.get("stage2_limit")
+                max_s3 = body_data.get("stage3_limit")
+
                 from analyzer.pipeline_runner import PipelineRunner
                 runner = PipelineRunner()
                 summary = runner.run_full_pipeline(
-                    max_lookback_days=7,
-                    max_stage1_batch=20,
-                    max_stage2_batch=15,
+                    max_stage1_batch=max_s1,
+                    max_stage2_batch=max_s2,
+                    max_stage3_batch=max_s3,
                 )
                 last_run_str = runner.run_repo.get_last_run_display()
                 self._send_json({

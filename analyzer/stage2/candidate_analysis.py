@@ -69,7 +69,7 @@ Career Optimization Weights:
 
 def analyze_candidate_job(
     job: Dict[str, Any],
-    stage1_analysis: Dict[str, Any],
+    stage1_analysis: Optional[Dict[str, Any]] = None,
     career_profile: Optional[Dict[str, Any]] = None,
     client: Optional[OpenRouterClient] = None,
 ) -> Dict[str, Any]:
@@ -86,6 +86,13 @@ def analyze_candidate_job(
         Validated dictionary containing Stage 2 fit scores, category assessments,
         strengths, skill gaps, concerns, reasoning, and model metadata.
     """
+    # If caller passed (job, career_profile) positionally:
+    if stage1_analysis is not None and "relevance_score" not in stage1_analysis and ("professional_summary" in stage1_analysis or "core_skills" in stage1_analysis):
+        career_profile = stage1_analysis
+        stage1_analysis = job
+    elif stage1_analysis is None:
+        stage1_analysis = job
+
     if career_profile is None:
         career_profile = load_career_profile()
 

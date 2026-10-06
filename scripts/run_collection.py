@@ -64,8 +64,11 @@ def main():
     print(f"Duplicates Skipped:   {stats['duplicates_skipped']}")
     print(f"New Unique Saved:     {stats['new_jobs_saved']}")
     print("By Source Breakdown:")
-    for src, count in stats["sources_summary"].items():
-        print(f"  • {src:30s} -> {count} new jobs")
+    for src, data in stats["sources_summary"].items():
+        if isinstance(data, dict):
+            print(f"  • {src:30s} -> {data.get('saved', 0)} new (fetched {data.get('fetched', 0)}, dupes {data.get('duplicates', 0)}, filtered {data.get('filtered', 0)})")
+        else:
+            print(f"  • {src:30s} -> {data} new jobs")
     print("==================================================")
 
 

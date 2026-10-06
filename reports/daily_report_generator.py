@@ -284,7 +284,7 @@ def generate_html_report(
     for j in action_jobs:
         jid = j["id"]
         priority_class = "priority-high" if j["priority"] == "high" else "priority-medium"
-        cv_name = j.get("recommended_cv", "General_Technical_CV")
+        cv_name = j.get("recommended_cv") or "General_Technical_CV"
         letter_escaped = html.escape(j.get("letter_text") or "No cover letter generated yet.")
         url = j.get("url") or "#"
         fresh = j["freshness"]
@@ -747,6 +747,16 @@ def generate_html_report(
             color: #34d399;
             border-color: rgba(52, 211, 153, 0.4);
             background: rgba(52, 211, 153, 0.06);
+        }}
+        .run-check-item.failed {{
+            color: #f87171;
+            border-color: rgba(248, 113, 113, 0.5);
+            background: rgba(239, 68, 68, 0.08);
+        }}
+        .run-check-item.cancelled {{
+            color: #fbbf24;
+            border-color: rgba(251, 191, 36, 0.5);
+            background: rgba(245, 158, 11, 0.08);
         }}
         .check-icon {{
             font-weight: 700;
@@ -3467,10 +3477,30 @@ def generate_html_report(
             document.getElementById('pipe-run-complete-view').style.display = 'none';
 
             // Reset progress bars and labels
-            document.getElementById('run-master-fill').style.width = '0%';
-            document.getElementById('run-master-pct').innerText = '0%';
+            const fillEl = document.getElementById('run-master-fill');
+            if (fillEl) {{
+                fillEl.style.width = '0%';
+                fillEl.style.backgroundColor = '';
+            }}
+            const pctEl = document.getElementById('run-master-pct');
+            if (pctEl) {{
+                pctEl.innerText = '0%';
+                pctEl.style.color = '';
+            }}
             document.getElementById('run-current-stage-title').innerText = 'Initializing autonomous pipeline...';
-            document.getElementById('run-live-callout').innerText = 'Current: Connecting to European sources & LinkedIn...';
+            const calloutEl = document.getElementById('run-live-callout');
+            if (calloutEl) {{
+                calloutEl.innerText = 'Current: Connecting to European sources & LinkedIn...';
+                calloutEl.style.borderLeftColor = '';
+                calloutEl.style.color = '';
+            }}
+            const spRing = document.querySelector('.run-spinner-ring');
+            if (spRing) {{
+                spRing.style.borderTopColor = '';
+                spRing.style.animation = '';
+            }}
+            const btnCancel = document.getElementById('btn-pipeline-cancel');
+            if (btnCancel) btnCancel.innerText = 'Cancel Run';
 
             // Reset checklist
             for (let i = 1; i <= 5; i++) {{
@@ -3478,7 +3508,10 @@ def generate_html_report(
                 if (el) {{
                     el.className = 'run-check-item';
                     const icon = el.querySelector('.check-icon');
-                    if (icon) icon.innerText = '○';
+                    if (icon) {{
+                        icon.innerText = '○';
+                        icon.style.color = '';
+                    }}
                 }}
             }}
 
@@ -3558,8 +3591,10 @@ def generate_html_report(
             const title = document.getElementById('run-current-stage-title');
             const callout = document.getElementById('run-live-callout');
 
-            if (fill && step.percent !== undefined) fill.style.width = step.percent + '%';
-            if (pct && step.percent !== undefined) pct.innerText = step.percent + '%';
+            if (step.stage !== 'error' && step.status !== 'failed' && step.stage !== 'cancelled' && step.status !== 'cancelled') {{
+                if (fill && step.percent !== undefined) fill.style.width = step.percent + '%';
+                if (pct && step.percent !== undefined) pct.innerText = step.percent + '%';
+            }}
             if (callout && step.callout) callout.innerText = 'Current: ' + step.callout;
 
             const setStepActive = (num) => {{
@@ -3592,7 +3627,21 @@ def generate_html_report(
                     let html = '';
                     for (const [k, v] of Object.entries(d.sources_summary)) {{
                         const cleanName = k.replace('greenhouse:', '').replace('lever:', '').replace('ashby:', '').replace('linkedin:', 'LinkedIn ');
-                        html += `<span class="source-chip done">✓ ${{escapeHtml(cleanName)}}: ${{v}} new</span> `;
+                        let metricStr = '';
+                        if (typeof v === 'object' && v !== null) {{
+                            const fetched = v.fetched !== undefined ? v.fetched : 0;
+                            const saved = v.saved !== undefined ? v.saved : 0;
+                            const dupes = v.duplicates !== undefined ? v.duplicates : 0;
+                            const errors = v.errors || 0;
+                            if (errors > 0) {{
+                                metricStr = 'error';
+                            }} else {{
+                                metricStr = `${{fetched}} fetched · ${{saved}} new · ${{dupes}} dup`;
+                            }}
+                        }} else {{
+                            metricStr = `${{v}} new`;
+                        }}
+                        html += `<span class="source-chip done">✓ ${{escapeHtml(cleanName)}}: ${{metricStr}}</span> `;
                     }}
                     chipsContainer.innerHTML = html;
                 }} else if (chipsContainer && d.source) {{
@@ -3604,7 +3653,15 @@ def generate_html_report(
                         chip.className = 'source-chip done';
                         chipsContainer.appendChild(chip);
                     }}
-                    chip.innerText = `✓ ${{d.source}}: ${{d.saved || 0}} new`;
+                    const fetched = d.fetched !== undefined ? d.fetched : 0;
+                    const saved = d.saved !== undefined ? d.saved : 0;
+                    const dupes = d.duplicates !== undefined ? d.duplicates : 0;
+                    const errors = d.errors || 0;
+                    if (errors > 0) {{
+                        chip.innerText = `✗ ${{d.source}}: error`;
+                    }} else {{
+                        chip.innerText = `✓ ${{d.source}}: ${{fetched}} fetched · ${{saved}} new · ${{dupes}} dup`;
+                    }}
                 }}
                 const sTot = document.getElementById('stat-collect-total');
                 if (sTot) sTot.innerText = (d.total !== undefined ? d.total : '...') + ' jobs collected';
@@ -3662,7 +3719,15 @@ def generate_html_report(
                 if (fM) {{ fM.className = d.market ? 'final-item done' : 'final-item'; fM.innerText = (d.market ? '✓ ' : '○ ') + 'Market intelligence updated'; }}
                 const statFin = document.getElementById('stat-final-status');
                 if (statFin) statFin.innerText = (d.db && d.queue && d.market) ? 'Updated' : 'Processing...';
-            }} else if (step.stage === 'complete') {{
+            }} else if (step.stage === 'complete' || step.status === 'completed') {{
+                if (fill) {{
+                    fill.style.width = '100%';
+                    fill.style.backgroundColor = '#10b981';
+                }}
+                if (pct) {{
+                    pct.innerText = '100%';
+                    pct.style.color = '#10b981';
+                }}
                 for (let i = 1; i <= 5; i++) {{
                     const it = document.getElementById('chk-step-' + i);
                     if (it) {{
@@ -3739,11 +3804,71 @@ def generate_html_report(
                         : `✓ Pipeline completed! Database is fully up to date.`;
                     showToast(toastMsg);
                 }}, 600);
-            }} else if (step.stage === 'error') {{
+            }} else if (step.stage === 'error' || step.status === 'failed') {{
                 isPipelineRunning = false;
-                if (title) title.innerText = '⚠️ Pipeline Execution Error';
-                if (callout) callout.innerText = step.callout || 'An error occurred during execution.';
+                if (title) title.innerText = '⚠️ Pipeline Execution Failed';
+                if (callout) {{
+                    callout.innerText = 'Failed: ' + (step.callout || step.error || 'An error occurred during execution.');
+                    callout.style.borderLeftColor = '#ef4444';
+                    callout.style.color = '#fca5a5';
+                }}
+                if (pct) {{
+                    pct.innerText = 'Failed';
+                    pct.style.color = '#ef4444';
+                }}
+                if (fill) {{
+                    fill.style.backgroundColor = '#ef4444';
+                }}
+                const spRing = document.querySelector('.run-spinner-ring');
+                if (spRing) {{
+                    spRing.style.borderTopColor = '#ef4444';
+                    spRing.style.animation = 'none';
+                }}
+                for (let i = 1; i <= 5; i++) {{
+                    const it = document.getElementById('chk-step-' + i);
+                    if (it && it.classList.contains('active')) {{
+                        it.className = 'run-check-item failed';
+                        const ic = it.querySelector('.check-icon');
+                        if (ic) {{
+                            ic.innerText = '✗';
+                            ic.style.color = '#ef4444';
+                        }}
+                    }}
+                }}
+                const hStatus = document.getElementById('header-status-text');
+                if (hStatus) {{
+                    hStatus.innerText = 'Run Failed';
+                    hStatus.style.color = '#ef4444';
+                }}
+                const btnCancel = document.getElementById('btn-pipeline-cancel');
+                if (btnCancel) btnCancel.innerText = 'Close';
                 showToast('❌ ' + (step.error || 'Pipeline execution failed.'));
+            }} else if (step.stage === 'cancelled' || step.status === 'cancelled') {{
+                isPipelineRunning = false;
+                if (title) title.innerText = 'Pipeline Execution Cancelled';
+                if (callout) {{
+                    callout.innerText = 'Cancelled: ' + (step.callout || 'Pipeline run was cancelled.');
+                    callout.style.borderLeftColor = '#f59e0b';
+                    callout.style.color = '#fde68a';
+                }}
+                if (pct) {{
+                    pct.innerText = 'Cancelled';
+                    pct.style.color = '#f59e0b';
+                }}
+                if (fill) fill.style.backgroundColor = '#f59e0b';
+                const spRing = document.querySelector('.run-spinner-ring');
+                if (spRing) {{
+                    spRing.style.borderTopColor = '#f59e0b';
+                    spRing.style.animation = 'none';
+                }}
+                const hStatus = document.getElementById('header-status-text');
+                if (hStatus) {{
+                    hStatus.innerText = 'Run Cancelled';
+                    hStatus.style.color = '#f59e0b';
+                }}
+                const btnCancel = document.getElementById('btn-pipeline-cancel');
+                if (btnCancel) btnCancel.innerText = 'Close';
+                showToast('Pipeline run cancelled.');
             }}
         }}
 
@@ -3757,7 +3882,7 @@ def generate_html_report(
                         try {{
                             const step = JSON.parse(e.data);
                             handlePipelineStep(step);
-                            if (step.stage === 'complete' || step.stage === 'error') {{
+                            if (step.stage === 'complete' || step.stage === 'error' || step.status === 'failed' || step.status === 'cancelled') {{
                                 es.close();
                                 pipelineRunEventSource = null;
                             }}
@@ -3771,7 +3896,7 @@ def generate_html_report(
                         if (isPipelineRunning && document.getElementById('run-master-pct').innerText !== '100%') {{
                             handlePipelineStep({{
                                 stage: 'error',
-                                percent: 100,
+                                status: 'failed',
                                 callout: 'Connection to server interrupted. Please check server logs and retry.',
                                 error: 'Connection lost'
                             }});
@@ -3784,7 +3909,7 @@ def generate_html_report(
             }}
             handlePipelineStep({{
                 stage: 'error',
-                percent: 100,
+                status: 'failed',
                 callout: 'Server not reachable via HTTP.',
                 error: 'HTTP required'
             }});

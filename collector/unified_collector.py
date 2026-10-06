@@ -64,7 +64,7 @@ class UnifiedCollector:
             "sources_summary": {},
         }
 
-        def report(src_name: str, fetched_cnt: int, saved_cnt: int, dupes_cnt: int):
+        def report(src_name: str, fetched_cnt: int, saved_cnt: int, dupes_cnt: int, filtered_cnt: int = 0, errors_cnt: int = 0):
             if progress_callback:
                 try:
                     progress_callback({
@@ -72,6 +72,8 @@ class UnifiedCollector:
                         "fetched": fetched_cnt,
                         "saved": saved_cnt,
                         "duplicates": dupes_cnt,
+                        "filtered": filtered_cnt,
+                        "errors": errors_cnt,
                         "total_fetched": stats["total_fetched"],
                         "total_saved": stats["new_jobs_saved"],
                         "sources_summary": stats["sources_summary"],
@@ -86,14 +88,29 @@ class UnifiedCollector:
                 print(f"[Collector] Fetching Greenhouse: {company} (Since: {since.strftime('%Y-%m-%d')})...")
                 try:
                     fetched = fetch_greenhouse_jobs(token, company)
-                    saved, dupes = self._process_and_save_jobs(fetched, "greenhouse", token)
+                    saved, dupes, filtered = self._process_and_save_jobs(fetched, "greenhouse", token)
                     stats["total_fetched"] += len(fetched)
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
-                    stats["sources_summary"][f"greenhouse:{company}"] = saved
-                    report(f"Greenhouse ({company})", len(fetched), saved, dupes)
+                    stats["passed_hybrid_filter"] += (len(fetched) - filtered)
+                    stats["sources_summary"][f"greenhouse:{company}"] = {
+                        "fetched": len(fetched),
+                        "saved": saved,
+                        "duplicates": dupes,
+                        "filtered": filtered,
+                        "errors": 0,
+                    }
+                    report(f"Greenhouse ({company})", len(fetched), saved, dupes, filtered, 0)
                 except Exception as err:
                     print(f"[Collector] Greenhouse error for {company}: {err}")
+                    stats["sources_summary"][f"greenhouse:{company}"] = {
+                        "fetched": 0,
+                        "saved": 0,
+                        "duplicates": 0,
+                        "filtered": 0,
+                        "errors": 1,
+                    }
+                    report(f"Greenhouse ({company})", 0, 0, 0, 0, 1)
 
         # 2. Lever Companies
         if enable_lever:
@@ -102,14 +119,29 @@ class UnifiedCollector:
                 print(f"[Collector] Fetching Lever: {company} (Since: {since.strftime('%Y-%m-%d')})...")
                 try:
                     fetched = fetch_lever_jobs(slug, company, since_date=since, filter_europe=True)
-                    saved, dupes = self._process_and_save_jobs(fetched, "lever", slug)
+                    saved, dupes, filtered = self._process_and_save_jobs(fetched, "lever", slug)
                     stats["total_fetched"] += len(fetched)
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
-                    stats["sources_summary"][f"lever:{company}"] = saved
-                    report(f"Lever ({company})", len(fetched), saved, dupes)
+                    stats["passed_hybrid_filter"] += (len(fetched) - filtered)
+                    stats["sources_summary"][f"lever:{company}"] = {
+                        "fetched": len(fetched),
+                        "saved": saved,
+                        "duplicates": dupes,
+                        "filtered": filtered,
+                        "errors": 0,
+                    }
+                    report(f"Lever ({company})", len(fetched), saved, dupes, filtered, 0)
                 except Exception as err:
                     print(f"[Collector] Lever error for {company}: {err}")
+                    stats["sources_summary"][f"lever:{company}"] = {
+                        "fetched": 0,
+                        "saved": 0,
+                        "duplicates": 0,
+                        "filtered": 0,
+                        "errors": 1,
+                    }
+                    report(f"Lever ({company})", 0, 0, 0, 0, 1)
 
         # 3. Ashby Companies
         if enable_ashby:
@@ -118,14 +150,29 @@ class UnifiedCollector:
                 print(f"[Collector] Fetching Ashby: {company} (Since: {since.strftime('%Y-%m-%d')})...")
                 try:
                     fetched = fetch_ashby_jobs(slug, company, since_date=since, filter_europe=True)
-                    saved, dupes = self._process_and_save_jobs(fetched, "ashby", slug)
+                    saved, dupes, filtered = self._process_and_save_jobs(fetched, "ashby", slug)
                     stats["total_fetched"] += len(fetched)
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
-                    stats["sources_summary"][f"ashby:{company}"] = saved
-                    report(f"Ashby ({company})", len(fetched), saved, dupes)
+                    stats["passed_hybrid_filter"] += (len(fetched) - filtered)
+                    stats["sources_summary"][f"ashby:{company}"] = {
+                        "fetched": len(fetched),
+                        "saved": saved,
+                        "duplicates": dupes,
+                        "filtered": filtered,
+                        "errors": 0,
+                    }
+                    report(f"Ashby ({company})", len(fetched), saved, dupes, filtered, 0)
                 except Exception as err:
                     print(f"[Collector] Ashby error for {company}: {err}")
+                    stats["sources_summary"][f"ashby:{company}"] = {
+                        "fetched": 0,
+                        "saved": 0,
+                        "duplicates": 0,
+                        "filtered": 0,
+                        "errors": 1,
+                    }
+                    report(f"Ashby ({company})", 0, 0, 0, 0, 1)
 
         # 4. Arbeitnow European Tech Board
         if enable_arbeitnow:
@@ -133,14 +180,29 @@ class UnifiedCollector:
             print(f"[Collector] Fetching Arbeitnow EU (Since: {since.strftime('%Y-%m-%d')})...")
             try:
                 fetched = fetch_arbeitnow_jobs(since_date=since, max_pages=2, filter_europe=True)
-                saved, dupes = self._process_and_save_jobs(fetched, "arbeitnow", "all_tech")
+                saved, dupes, filtered = self._process_and_save_jobs(fetched, "arbeitnow", "all_tech")
                 stats["total_fetched"] += len(fetched)
                 stats["duplicates_skipped"] += dupes
                 stats["new_jobs_saved"] += saved
-                stats["sources_summary"]["arbeitnow"] = saved
-                report("Arbeitnow EU", len(fetched), saved, dupes)
+                stats["passed_hybrid_filter"] += (len(fetched) - filtered)
+                stats["sources_summary"]["arbeitnow"] = {
+                    "fetched": len(fetched),
+                    "saved": saved,
+                    "duplicates": dupes,
+                    "filtered": filtered,
+                    "errors": 0,
+                }
+                report("Arbeitnow EU", len(fetched), saved, dupes, filtered, 0)
             except Exception as err:
                 print(f"[Collector] Arbeitnow error: {err}")
+                stats["sources_summary"]["arbeitnow"] = {
+                    "fetched": 0,
+                    "saved": 0,
+                    "duplicates": 0,
+                    "filtered": 0,
+                    "errors": 1,
+                }
+                report("Arbeitnow EU", 0, 0, 0, 0, 1)
 
         # 5. LinkedIn European Guest Mode
         if enable_linkedin:
@@ -156,27 +218,43 @@ class UnifiedCollector:
                         max_results=8,
                         delay_between_requests=1.2,
                     )
-                    saved, dupes = self._process_and_save_jobs(fetched, "linkedin", target_key)
+                    saved, dupes, filtered = self._process_and_save_jobs(fetched, "linkedin", target_key)
                     stats["total_fetched"] += len(fetched)
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
-                    stats["sources_summary"][f"linkedin:{target_key}"] = saved
-                    report(f"LinkedIn ({q['keywords'][:18]})", len(fetched), saved, dupes)
+                    stats["passed_hybrid_filter"] += (len(fetched) - filtered)
+                    stats["sources_summary"][f"linkedin:{target_key}"] = {
+                        "fetched": len(fetched),
+                        "saved": saved,
+                        "duplicates": dupes,
+                        "filtered": filtered,
+                        "errors": 0,
+                    }
+                    report(f"LinkedIn ({q['keywords'][:18]})", len(fetched), saved, dupes, filtered, 0)
                 except Exception as err:
                     print(f"[Collector] LinkedIn error for '{q['keywords']}': {err}")
+                    stats["sources_summary"][f"linkedin:{target_key}"] = {
+                        "fetched": 0,
+                        "saved": 0,
+                        "duplicates": 0,
+                        "filtered": 0,
+                        "errors": 1,
+                    }
+                    report(f"LinkedIn ({q['keywords'][:18]})", 0, 0, 0, 0, 1)
 
         return stats
 
 
     def _process_and_save_jobs(
         self, raw_jobs: List[Dict[str, Any]], source: str, target: str
-    ) -> (int, int):
+    ) -> (int, int, int):
         if not raw_jobs:
             self.sync_repo.update_sync_state(source, target, jobs_collected=0)
-            return 0, 0
+            return 0, 0, 0
 
         # Filter for AI/technical relevance
         candidates, _ = filter_jobs_for_ai(raw_jobs)
+        filtered_count = max(0, len(raw_jobs) - len(candidates))
         saved_count = 0
         dupes_count = 0
 
@@ -192,7 +270,7 @@ class UnifiedCollector:
             saved_count += 1
 
         self.sync_repo.update_sync_state(source, target, jobs_collected=saved_count)
-        return saved_count, dupes_count
+        return saved_count, dupes_count, filtered_count
 
     def close(self):
         self.job_repo.close()

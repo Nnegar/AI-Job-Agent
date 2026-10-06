@@ -88,6 +88,85 @@ class PipelineRunRepository:
         self.connection.commit()
         return cursor.rowcount > 0
 
+    def fail_run(
+        self,
+        run_id: int,
+        error_message: str,
+        partial_summary: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        cursor = self.connection.cursor()
+        now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        summary = dict(partial_summary or {})
+        summary["error"] = error_message
+        summary_json = json.dumps(summary, ensure_ascii=False)
+        cursor.execute(
+            """
+            UPDATE pipeline_execution_runs
+            SET completed_at = ?,
+                status = 'failed',
+                total_collected = ?,
+                duplicates_skipped = ?,
+                new_jobs_saved = ?,
+                stage1_evaluated = ?,
+                stage2_evaluated = ?,
+                shortlisted = ?,
+                summary_json = ?
+            WHERE id = ? AND status = 'running'
+            """,
+            (
+                now_str,
+                summary.get("collected", 0),
+                summary.get("duplicates", 0),
+                summary.get("new_jobs", 0),
+                summary.get("stage1_evaluated", 0),
+                summary.get("stage2_evaluated", 0),
+                summary.get("shortlisted", 0),
+                summary_json,
+                run_id,
+            ),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def cancel_run(
+        self,
+        run_id: int,
+        partial_summary: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        cursor = self.connection.cursor()
+        now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        summary = dict(partial_summary or {})
+        summary["cancelled"] = True
+        summary_json = json.dumps(summary, ensure_ascii=False)
+        cursor.execute(
+            """
+            UPDATE pipeline_execution_runs
+            SET completed_at = ?,
+                status = 'cancelled',
+                total_collected = ?,
+                duplicates_skipped = ?,
+                new_jobs_saved = ?,
+                stage1_evaluated = ?,
+                stage2_evaluated = ?,
+                shortlisted = ?,
+                summary_json = ?
+            WHERE id = ? AND status = 'running'
+            """,
+            (
+                now_str,
+                summary.get("collected", 0),
+                summary.get("duplicates", 0),
+                summary.get("new_jobs", 0),
+                summary.get("stage1_evaluated", 0),
+                summary.get("stage2_evaluated", 0),
+                summary.get("shortlisted", 0),
+                summary_json,
+                run_id,
+            ),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
     def get_last_completed_run(self) -> Optional[Dict[str, Any]]:
         cursor = self.connection.cursor()
         cursor.execute(

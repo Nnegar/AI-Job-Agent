@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Any, Dict, List, Optional
 
 
 class JobRepository:
@@ -59,12 +60,11 @@ class JobRepository:
         self.connection.commit()
 
 
-    def get_unanalyzed_jobs(self):
+    def get_unanalyzed_jobs(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
 
         cursor = self.connection.cursor()
 
-        cursor.execute(
-            """
+        query = """
             SELECT jobs.*
             FROM jobs
 
@@ -74,8 +74,12 @@ class JobRepository:
             WHERE job_ai_analysis.id IS NULL
 
             ORDER BY jobs.id
-            """
-        )
+        """
+
+        if limit is not None and limit > 0:
+            query += f" LIMIT {int(limit)}"
+
+        cursor.execute(query)
 
         return [
             dict(row)
