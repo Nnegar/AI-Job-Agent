@@ -66,104 +66,33 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
-            import time
-            import datetime
+            from analyzer.pipeline_runner import PipelineRunner
 
-            steps = [
-                {
-                    "stage": "init",
-                    "percent": 8,
-                    "callout": "Connecting to European sources & LinkedIn...",
-                },
-                {
-                    "stage": "collect",
-                    "percent": 25,
-                    "callout": "Collecting from Cloudflare, Datadog, Elastic, Arbeitnow, LinkedIn...",
-                    "data": {
-                        "cloudflare": 43,
-                        "datadog": 27,
-                        "elastic": 18,
-                        "others": 39,
-                        "total": 109,
-                    },
-                },
-                {
-                    "stage": "dedupe",
-                    "percent": 42,
-                    "callout": "Deduplicating across sources and 7-day lookback window...",
-                    "data": {
-                        "collected": 109,
-                        "duplicates": 17,
-                        "new_jobs": 92,
-                    },
-                },
-                {
-                    "stage": "stage1",
-                    "percent": 65,
-                    "callout": "Stage 1 — Relevance screening: analyzing job 82 of 92",
-                    "data": {
-                        "current": 82,
-                        "total": 92,
-                        "passed": 41,
-                        "rejected": 51,
-                    },
-                },
-                {
-                    "stage": "stage2",
-                    "percent": 84,
-                    "callout": "Stage 2 — Candidate matching: evaluating job 19 of 41",
-                    "data": {
-                        "current": 19,
-                        "total": 41,
-                        "strong": 14,
-                        "borderline": 5,
-                    },
-                },
-                {
-                    "stage": "final",
-                    "percent": 96,
-                    "callout": "Updating database, application queue, and market intelligence...",
-                    "data": {"db": True, "queue": True, "market": True},
-                },
-                {
-                    "stage": "complete",
-                    "percent": 100,
-                    "callout": "Pipeline completed! 92 new jobs processed.",
-                    "summary": {
-                        "collected": 109,
-                        "duplicates": 17,
-                        "new_jobs": 92,
-                        "stage2": 41,
-                        "shortlisted": 18,
-                        "domains": {
-                            "Cybersecurity": 9,
-                            "Telecom AI": 5,
-                            "Applied AI": 3,
-                            "SRE / Cloud": 1,
-                        },
-                        "queue_before": 20,
-                        "queue_after": 24,
-                    },
-                },
-            ]
-
-            for step in steps:
-                msg = f"data: {json.dumps(step)}\n\n"
+            def emit_sse(step_data):
+                msg = f"data: {json.dumps(step_data)}\n\n"
                 try:
                     self.wfile.write(msg.encode("utf-8"))
                     self.wfile.flush()
-                    time.sleep(0.35)
                 except (BrokenPipeError, ConnectionResetError):
-                    break
+                    pass
 
             try:
-                from database.sync_repository import SyncRepository
-                sync_repo = SyncRepository()
-                sync_repo.update_sync_state("unified", "all", jobs_collected=92)
-                sync_repo.close()
-                generate_daily_reports()
+                runner = PipelineRunner()
+                runner.run_full_pipeline(
+                    max_lookback_days=7,
+                    max_stage1_batch=20,
+                    max_stage2_batch=15,
+                    event_callback=emit_sse,
+                )
             except Exception as e:
-                print(f"[DashboardServer] Post-run sync error: {e}")
+                import traceback
+                traceback.print_exc()
+                emit_sse({
+                    "stage": "error",
+                    "percent": 100,
+                    "callout": f"Pipeline execution error: {str(e)}",
+                    "error": str(e),
+                })
             return
 
         # 3. API: Database Historical Query (Paginated)
@@ -286,35 +215,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # 3. API: Run Pipeline (Direct JSON response)
         if url_path == "/api/pipeline/run":
-            import datetime
             try:
-                from database.sync_repository import SyncRepository
-                sync_repo = SyncRepository()
-                sync_repo.update_sync_state("unified", "all", jobs_collected=92)
-                sync_repo.close()
-                generate_daily_reports()
-                now_str = datetime.datetime.now().strftime("Today, %H:%M")
+                from analyzer.pipeline_runner import PipelineRunner
+                runner = PipelineRunner()
+                summary = runner.run_full_pipeline(
+                    max_lookback_days=7,
+                    max_stage1_batch=20,
+                    max_stage2_batch=15,
+                )
+                last_run_str = runner.run_repo.get_last_run_display()
                 self._send_json({
                     "success": True,
                     "stage": "complete",
-                    "last_run": now_str,
-                    "summary": {
-                        "collected": 109,
-                        "duplicates": 17,
-                        "new_jobs": 92,
-                        "stage2": 41,
-                        "shortlisted": 18,
-                        "domains": {
-                            "Cybersecurity": 9,
-                            "Telecom AI": 5,
-                            "Applied AI": 3,
-                            "SRE / Cloud": 1,
-                        },
-                        "queue_before": 20,
-                        "queue_after": 24,
-                    },
+                    "last_run": last_run_str,
+                    "summary": summary,
                 })
             except Exception as err:
+                import traceback
+                traceback.print_exc()
                 self._send_json({"error": str(err)}, status_code=500)
             return
 

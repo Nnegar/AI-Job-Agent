@@ -6,6 +6,7 @@ Filters by European locations and applies incremental lookback window.
 
 import datetime
 import json
+import re
 import urllib.parse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -97,7 +98,23 @@ def fetch_lever_jobs(
 
         description_html = item.get("description", "")
         description_plain = item.get("descriptionPlain", "")
-        desc = description_html if description_html else description_plain
+        desc = description_plain if description_plain else description_html
+
+        # Append lists (qualifications, responsibilities, requirements)
+        lists_content = []
+        for l in (item.get("lists") or []):
+            header = l.get("text") or ""
+            content = l.get("content") or ""
+            clean_content = re.sub(r"<[^>]+>", " ", content).strip()
+            if header or clean_content:
+                lists_content.append(f"{header}:\n{clean_content}")
+
+        if lists_content:
+            desc += "\n\n" + "\n\n".join(lists_content)
+
+        additional = item.get("additionalPlain") or item.get("additional") or ""
+        if additional:
+            desc += f"\n\n{additional}"
 
         collected_jobs.append({
             "source": "lever",

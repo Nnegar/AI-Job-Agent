@@ -274,8 +274,10 @@ def generate_html_report(
     total_db_count = len(all_db_jobs)
     active_pipe_count = pipeline_summary.get("all_active", 0)
 
-    now = datetime.datetime.now()
-    last_run_display = f"{now.day} {now.strftime('%b')}, {now.strftime('%H:%M')}"
+    from database.pipeline_run_repository import PipelineRunRepository
+    run_repo = PipelineRunRepository()
+    last_run_display = run_repo.get_last_run_display()
+    run_repo.close()
 
     # 1. Generate Action Queue Cards HTML (Tab 1)
     action_cards_html = []
@@ -3583,61 +3585,83 @@ def generate_html_report(
                 if (title) title.innerText = 'Connecting to European sources & LinkedIn...';
             }} else if (step.stage === 'collect') {{
                 setStepActive(1);
-                if (title) title.innerText = '1. Collection';
-                const chipCf = document.getElementById('chip-cloudflare');
-                if (chipCf) {{ chipCf.className = 'source-chip done'; chipCf.innerText = '✓ Cloudflare: 43 new'; }}
-                const chipDd = document.getElementById('chip-datadog');
-                if (chipDd) {{ chipDd.className = 'source-chip done'; chipDd.innerText = '✓ Datadog: 27 new'; }}
-                const chipEl = document.getElementById('chip-elastic');
-                if (chipEl) {{ chipEl.className = 'source-chip done'; chipEl.innerText = '✓ Elastic: 18 new'; }}
-                const chipOt = document.getElementById('chip-others');
-                if (chipOt) {{ chipOt.className = 'source-chip done'; chipOt.innerText = '✓ Other sources: 39 new'; }}
+                if (title) title.innerText = '1. Multi-Source Collection';
+                const d = step.data || {{}};
+                const chipsContainer = document.getElementById('detail-collect-chips');
+                if (chipsContainer && d.sources_summary && Object.keys(d.sources_summary).length > 0) {{
+                    let html = '';
+                    for (const [k, v] of Object.entries(d.sources_summary)) {{
+                        const cleanName = k.replace('greenhouse:', '').replace('lever:', '').replace('ashby:', '').replace('linkedin:', 'LinkedIn ');
+                        html += `<span class="source-chip done">✓ ${{escapeHtml(cleanName)}}: ${{v}} new</span> `;
+                    }}
+                    chipsContainer.innerHTML = html;
+                }} else if (chipsContainer && d.source) {{
+                    const chipId = 'chip-src-' + d.source.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+                    let chip = document.getElementById(chipId);
+                    if (!chip) {{
+                        chip = document.createElement('span');
+                        chip.id = chipId;
+                        chip.className = 'source-chip done';
+                        chipsContainer.appendChild(chip);
+                    }}
+                    chip.innerText = `✓ ${{d.source}}: ${{d.saved || 0}} new`;
+                }}
                 const sTot = document.getElementById('stat-collect-total');
-                if (sTot) sTot.innerText = '109 jobs collected';
+                if (sTot) sTot.innerText = (d.total !== undefined ? d.total : '...') + ' jobs collected';
             }} else if (step.stage === 'dedupe') {{
                 setStepActive(2);
                 if (title) title.innerText = '2. Deduplication & Capped Lookback';
+                const d = step.data || {{}};
                 const lIng = document.getElementById('line-dedupe-collected');
-                if (lIng) lIng.innerText = '✓ 109 collected';
+                if (lIng) lIng.innerText = `✓ ${{d.collected !== undefined ? d.collected : 0}} collected`;
                 const lDup = document.getElementById('line-dedupe-dupes');
-                if (lDup) lDup.innerText = '✓ 17 duplicates';
+                if (lDup) lDup.innerText = `✓ ${{d.duplicates !== undefined ? d.duplicates : 0}} duplicates skipped`;
                 const lUniq = document.getElementById('line-dedupe-unique');
-                if (lUniq) lUniq.innerText = '→ 92 new jobs';
+                if (lUniq) lUniq.innerText = `→ ${{d.new_jobs !== undefined ? d.new_jobs : 0}} new unique jobs`;
                 const sDed = document.getElementById('stat-dedupe-result');
-                if (sDed) sDed.innerText = '92 new jobs';
+                if (sDed) sDed.innerText = `${{d.new_jobs !== undefined ? d.new_jobs : 0}} new jobs`;
             }} else if (step.stage === 'stage1') {{
                 setStepActive(3);
                 if (title) title.innerText = '3. Stage 1 — Relevance screening';
+                const d = step.data || {{}};
+                const total = d.total || 0;
+                const current = d.current || 0;
+                const pct = total > 0 ? Math.round((current / total) * 100) : 100;
                 const fillS1 = document.getElementById('fill-stage1');
-                if (fillS1) fillS1.style.width = '89%';
+                if (fillS1) fillS1.style.width = pct + '%';
                 const s1P = document.getElementById('stat-stage1-progress');
-                if (s1P) s1P.innerText = '82 / 92';
+                if (s1P) s1P.innerText = total > 0 ? `${{current}} / ${{total}}` : 'Up to date';
                 const s1Pass = document.getElementById('stat-stage1-passed');
-                if (s1Pass) s1Pass.innerText = 'Send to Stage 2: 41';
+                if (s1Pass) s1Pass.innerText = `Send to Stage 2: ${{d.passed !== undefined ? d.passed : '—'}}`;
                 const s1Rej = document.getElementById('stat-stage1-rejected');
-                if (s1Rej) s1Rej.innerText = 'Rejected: 51';
+                if (s1Rej) s1Rej.innerText = `Rejected: ${{d.rejected !== undefined ? d.rejected : '—'}}`;
             }} else if (step.stage === 'stage2') {{
                 setStepActive(4);
                 if (title) title.innerText = '4. Stage 2 — Candidate matching';
+                const d = step.data || {{}};
+                const total = d.total || 0;
+                const current = d.current || 0;
+                const pct = total > 0 ? Math.round((current / total) * 100) : 100;
                 const fillS2 = document.getElementById('fill-stage2');
-                if (fillS2) fillS2.style.width = '46%';
+                if (fillS2) fillS2.style.width = pct + '%';
                 const s2P = document.getElementById('stat-stage2-progress');
-                if (s2P) s2P.innerText = '19 / 41';
+                if (s2P) s2P.innerText = total > 0 ? `${{current}} / ${{total}}` : 'Up to date';
                 const s2Str = document.getElementById('stat-stage2-strong');
-                if (s2Str) s2Str.innerText = 'Strong matches: 14';
+                if (s2Str) s2Str.innerText = `Strong matches: ${{d.strong !== undefined ? d.strong : '—'}}`;
                 const s2Brd = document.getElementById('stat-stage2-borderline');
-                if (s2Brd) s2Brd.innerText = 'Borderline: 5';
+                if (s2Brd) s2Brd.innerText = `Borderline: ${{d.borderline !== undefined ? d.borderline : '—'}}`;
             }} else if (step.stage === 'final') {{
                 setStepActive(5);
                 if (title) title.innerText = '5. Final update';
+                const d = step.data || {{}};
                 const fDb = document.getElementById('fitem-db');
-                if (fDb) {{ fDb.className = 'final-item done'; fDb.innerText = '✓ Job database updated'; }}
+                if (fDb) {{ fDb.className = d.db ? 'final-item done' : 'final-item active'; fDb.innerText = (d.db ? '✓ ' : '● ') + 'Job database updated'; }}
                 const fQ = document.getElementById('fitem-queue');
-                if (fQ) {{ fQ.className = 'final-item done'; fQ.innerText = '✓ Application queue updated'; }}
+                if (fQ) {{ fQ.className = d.queue ? 'final-item done' : 'final-item'; fQ.innerText = (d.queue ? '✓ ' : '○ ') + 'Application queue updated'; }}
                 const fM = document.getElementById('fitem-market');
-                if (fM) {{ fM.className = 'final-item done'; fM.innerText = '✓ Market intelligence updated'; }}
+                if (fM) {{ fM.className = d.market ? 'final-item done' : 'final-item'; fM.innerText = (d.market ? '✓ ' : '○ ') + 'Market intelligence updated'; }}
                 const statFin = document.getElementById('stat-final-status');
-                if (statFin) statFin.innerText = 'Updated';
+                if (statFin) statFin.innerText = (d.db && d.queue && d.market) ? 'Updated' : 'Processing...';
             }} else if (step.stage === 'complete') {{
                 for (let i = 1; i <= 5; i++) {{
                     const it = document.getElementById('chk-step-' + i);
@@ -3655,67 +3679,72 @@ def generate_html_report(
                     // Update completion metrics
                     const s = step.summary || {{}};
                     const mCol = document.getElementById('comp-metric-collected');
-                    if (mCol) mCol.innerText = s.collected || '109';
+                    if (mCol) mCol.innerText = s.collected !== undefined ? s.collected : 0;
                     const mDup = document.getElementById('comp-metric-dupes');
-                    if (mDup) mDup.innerText = s.duplicates || '17';
+                    if (mDup) mDup.innerText = s.duplicates !== undefined ? s.duplicates : 0;
                     const mNew = document.getElementById('comp-metric-new');
-                    if (mNew) mNew.innerText = s.new_jobs || '92';
+                    if (mNew) mNew.innerText = s.new_jobs !== undefined ? s.new_jobs : 0;
                     const mS2 = document.getElementById('comp-metric-stage2');
-                    if (mS2) mS2.innerText = s.stage2 || '41';
+                    if (mS2) mS2.innerText = (s.stage2_evaluated !== undefined ? s.stage2_evaluated : (s.stage2 !== undefined ? s.stage2 : 0));
                     const mShort = document.getElementById('comp-metric-shortlist');
-                    if (mShort) mShort.innerText = s.shortlisted || '18';
+                    if (mShort) mShort.innerText = s.shortlisted !== undefined ? s.shortlisted : 0;
+
+                    const subtitle = document.getElementById('complete-subtitle');
+                    if (subtitle) {{
+                        if (s.new_jobs > 0) {{
+                            subtitle.innerText = `${{s.new_jobs}} new jobs processed`;
+                        }} else if (s.stage1_evaluated > 0) {{
+                            subtitle.innerText = `${{s.stage1_evaluated}} queued jobs evaluated`;
+                        }} else {{
+                            subtitle.innerText = 'Database & sources are fully up to date';
+                        }}
+                    }}
+
+                    // Render dynamic track breakdown pills
+                    const domGrid = document.getElementById('comp-domains-grid');
+                    if (domGrid && s.domains) {{
+                        let domHtml = '';
+                        for (const [dName, dCount] of Object.entries(s.domains)) {{
+                            domHtml += `
+                                <div class="domain-pill-card">
+                                    <span class="domain-name">${{escapeHtml(dName)}}</span>
+                                    <span class="domain-val">${{dCount}}</span>
+                                </div>
+                            `;
+                        }}
+                        if (domHtml) domGrid.innerHTML = domHtml;
+                    }}
 
                     const qTitle = document.getElementById('comp-queue-title');
-                    if (qTitle) qTitle.innerText = `Application queue: ${{s.queue_before || 20}} → ${{s.queue_after || 24}}`;
+                    if (qTitle) qTitle.innerText = `Application queue: ${{s.queue_before !== undefined ? s.queue_before : 20}} → ${{s.queue_after !== undefined ? s.queue_after : 20}}`;
 
                     // Update Header
                     const hStatus = document.getElementById('header-status-text');
                     if (hStatus) hStatus.innerText = 'Up to date';
 
-                    const nowTime = new Date().toLocaleTimeString([], {{hour: '2-digit', minute:'2-digit'}});
                     const hLastRun = document.getElementById('header-last-run');
-                    if (hLastRun) hLastRun.innerText = `Last run: Today, ${{nowTime}}`;
+                    if (hLastRun && step.last_run) {{
+                        hLastRun.innerText = `Last run: ${{step.last_run}}`;
+                    }}
 
                     // Update dashboard count badges
                     const topAction = document.getElementById('top-action-count');
-                    if (topAction) topAction.innerText = s.queue_after || '24';
+                    if (topAction && s.queue_after !== undefined) topAction.innerText = s.queue_after;
                     const badgeAction = document.getElementById('badge-applications-count');
-                    if (badgeAction) badgeAction.innerText = s.queue_after || '24';
+                    if (badgeAction && s.queue_after !== undefined) badgeAction.innerText = s.queue_after;
 
                     isPipelineRunning = false;
-                    showToast('🎉 Pipeline completed! 92 new jobs processed.');
+                    const toastMsg = s.new_jobs > 0 
+                        ? `🎉 Pipeline completed! ${{s.new_jobs}} new jobs processed.`
+                        : `✓ Pipeline completed! Database is fully up to date.`;
+                    showToast(toastMsg);
                 }}, 600);
+            }} else if (step.stage === 'error') {{
+                isPipelineRunning = false;
+                if (title) title.innerText = '⚠️ Pipeline Execution Error';
+                if (callout) callout.innerText = step.callout || 'An error occurred during execution.';
+                showToast('❌ ' + (step.error || 'Pipeline execution failed.'));
             }}
-        }}
-
-        function simulatePipelineRun() {{
-            const steps = [
-                {{ stage: 'init', percent: 8, callout: 'Connecting to European sources & LinkedIn...' }},
-                {{ stage: 'collect', percent: 25, callout: 'Collecting from Cloudflare, Datadog, Elastic, Arbeitnow...' }},
-                {{ stage: 'dedupe', percent: 42, callout: 'Deduplicating across sources and 7-day lookback window...' }},
-                {{ stage: 'stage1', percent: 65, callout: 'Analyzing job 82 of 92 (Relevance filtering)...' }},
-                {{ stage: 'stage2', percent: 84, callout: 'Evaluating job 19 of 41 (Profile & CV matching)...' }},
-                {{ stage: 'final', percent: 96, callout: 'Persisting decisions and updating database...' }},
-                {{ stage: 'complete', percent: 100, callout: 'Pipeline completed!', summary: {{
-                    collected: 109,
-                    duplicates: 17,
-                    new_jobs: 92,
-                    stage2: 41,
-                    shortlisted: 18,
-                    queue_before: 20,
-                    queue_after: 24
-                }} }}
-            ];
-
-            let idx = 0;
-            const timer = setInterval(() => {{
-                if (idx < steps.length) {{
-                    handlePipelineStep(steps[idx]);
-                    idx++;
-                }} else {{
-                    clearInterval(timer);
-                }}
-            }}, 700);
         }}
 
         function startPipelineExecution() {{
@@ -3728,7 +3757,7 @@ def generate_html_report(
                         try {{
                             const step = JSON.parse(e.data);
                             handlePipelineStep(step);
-                            if (step.stage === 'complete') {{
+                            if (step.stage === 'complete' || step.stage === 'error') {{
                                 es.close();
                                 pipelineRunEventSource = null;
                             }}
@@ -3740,16 +3769,27 @@ def generate_html_report(
                         es.close();
                         pipelineRunEventSource = null;
                         if (isPipelineRunning && document.getElementById('run-master-pct').innerText !== '100%') {{
-                            simulatePipelineRun();
+                            handlePipelineStep({{
+                                stage: 'error',
+                                percent: 100,
+                                callout: 'Connection to server interrupted. Please check server logs and retry.',
+                                error: 'Connection lost'
+                            }});
                         }}
                     }};
                     return;
                 }} catch(err) {{
-                    console.warn('EventSource unavailable, falling back to simulation:', err);
+                    console.warn('EventSource failed:', err);
                 }}
             }}
-            simulatePipelineRun();
+            handlePipelineStep({{
+                stage: 'error',
+                percent: 100,
+                callout: 'Server not reachable via HTTP.',
+                error: 'HTTP required'
+            }});
         }}
+
 
         function showToast(msg) {{
             const toast = document.getElementById('toast');

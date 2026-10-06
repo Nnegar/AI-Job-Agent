@@ -1,6 +1,8 @@
 import json
 import os
 import unittest
+from unittest.mock import patch
+import analyzer.pipeline_runner
 from http.server import HTTPServer
 import threading
 import urllib.request
@@ -79,7 +81,22 @@ class TestServeDashboard(unittest.TestCase):
             self.assertTrue(data.get("success"))
             self.assertIn("summary", data)
 
-    def test_post_pipeline_run_api(self):
+    @patch("analyzer.pipeline_runner.PipelineRunner")
+    def test_post_pipeline_run_api(self, mock_runner_cls):
+        mock_instance = mock_runner_cls.return_value
+        mock_instance.run_full_pipeline.return_value = {
+            "collected": 50,
+            "duplicates": 10,
+            "new_jobs": 40,
+            "stage1_evaluated": 20,
+            "stage2_evaluated": 15,
+            "shortlisted": 8,
+            "domains": {"Cybersecurity": 5, "Telecom AI": 3},
+            "queue_before": 20,
+            "queue_after": 25,
+        }
+        mock_instance.run_repo.get_last_run_display.return_value = "Today, 14:00"
+
         req = urllib.request.Request(
             f"{self.base_url}/api/pipeline/run",
             data=b"{}",
@@ -91,12 +108,21 @@ class TestServeDashboard(unittest.TestCase):
             data = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(data.get("success"))
             self.assertIn("summary", data)
-            self.assertEqual(data["summary"]["collected"], 109)
-            self.assertEqual(data["summary"]["new_jobs"], 92)
-            self.assertEqual(data["summary"]["stage2"], 41)
-            self.assertEqual(data["summary"]["shortlisted"], 18)
+            self.assertEqual(data["summary"]["collected"], 50)
+            self.assertEqual(data["summary"]["new_jobs"], 40)
+            self.assertEqual(data["last_run"], "Today, 14:00")
 
-    def test_get_pipeline_run_stream_api(self):
+    @patch("analyzer.pipeline_runner.PipelineRunner")
+    def test_get_pipeline_run_stream_api(self, mock_runner_cls):
+        def fake_run(event_callback=None, **kwargs):
+            if event_callback:
+                event_callback({"stage": "init", "percent": 5, "callout": "Connecting..."})
+                event_callback({"stage": "complete", "percent": 100, "callout": "Done", "summary": {}})
+            return {}
+
+        mock_instance = mock_runner_cls.return_value
+        mock_instance.run_full_pipeline.side_effect = fake_run
+
         req = urllib.request.Request(f"{self.base_url}/api/pipeline/run-stream")
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
@@ -104,6 +130,8 @@ class TestServeDashboard(unittest.TestCase):
             # Read first chunk
             chunk = resp.readline().decode("utf-8")
             self.assertTrue(chunk.startswith("data:"))
+            first_event = json.loads(chunk[len("data:"):].strip())
+            self.assertEqual(first_event.get("stage"), "init")
 
     def test_serve_html_dashboard(self):
         req = urllib.request.Request(f"{self.base_url}/")

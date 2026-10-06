@@ -14,6 +14,7 @@ from collector.lever import is_european_location
 
 DEFAULT_ASHBY_COMPANIES = {
     "Linear": "linear",
+    "Synthesia": "synthesia",
 }
 
 

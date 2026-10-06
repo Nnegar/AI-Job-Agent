@@ -10,7 +10,7 @@ Applies:
 
 import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from collector.arbeitnow import fetch_arbeitnow_jobs
 from collector.ashby import fetch_ashby_jobs, DEFAULT_ASHBY_COMPANIES
@@ -51,6 +51,7 @@ class UnifiedCollector:
         enable_arbeitnow: bool = True,
         enable_linkedin: bool = True,
         max_lookback_days: int = 7,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """
         Runs the full multi-source collection with capped lookback and deduplication.
@@ -62,6 +63,21 @@ class UnifiedCollector:
             "new_jobs_saved": 0,
             "sources_summary": {},
         }
+
+        def report(src_name: str, fetched_cnt: int, saved_cnt: int, dupes_cnt: int):
+            if progress_callback:
+                try:
+                    progress_callback({
+                        "source": src_name,
+                        "fetched": fetched_cnt,
+                        "saved": saved_cnt,
+                        "duplicates": dupes_cnt,
+                        "total_fetched": stats["total_fetched"],
+                        "total_saved": stats["new_jobs_saved"],
+                        "sources_summary": stats["sources_summary"],
+                    })
+                except Exception as cb_err:
+                    print(f"[Collector] Progress callback error: {cb_err}")
 
         # 1. Greenhouse Companies
         if enable_greenhouse:
@@ -75,6 +91,7 @@ class UnifiedCollector:
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
                     stats["sources_summary"][f"greenhouse:{company}"] = saved
+                    report(f"Greenhouse ({company})", len(fetched), saved, dupes)
                 except Exception as err:
                     print(f"[Collector] Greenhouse error for {company}: {err}")
 
@@ -90,6 +107,7 @@ class UnifiedCollector:
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
                     stats["sources_summary"][f"lever:{company}"] = saved
+                    report(f"Lever ({company})", len(fetched), saved, dupes)
                 except Exception as err:
                     print(f"[Collector] Lever error for {company}: {err}")
 
@@ -105,6 +123,7 @@ class UnifiedCollector:
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
                     stats["sources_summary"][f"ashby:{company}"] = saved
+                    report(f"Ashby ({company})", len(fetched), saved, dupes)
                 except Exception as err:
                     print(f"[Collector] Ashby error for {company}: {err}")
 
@@ -119,6 +138,7 @@ class UnifiedCollector:
                 stats["duplicates_skipped"] += dupes
                 stats["new_jobs_saved"] += saved
                 stats["sources_summary"]["arbeitnow"] = saved
+                report("Arbeitnow EU", len(fetched), saved, dupes)
             except Exception as err:
                 print(f"[Collector] Arbeitnow error: {err}")
 
@@ -141,10 +161,12 @@ class UnifiedCollector:
                     stats["duplicates_skipped"] += dupes
                     stats["new_jobs_saved"] += saved
                     stats["sources_summary"][f"linkedin:{target_key}"] = saved
+                    report(f"LinkedIn ({q['keywords'][:18]})", len(fetched), saved, dupes)
                 except Exception as err:
                     print(f"[Collector] LinkedIn error for '{q['keywords']}': {err}")
 
         return stats
+
 
     def _process_and_save_jobs(
         self, raw_jobs: List[Dict[str, Any]], source: str, target: str
